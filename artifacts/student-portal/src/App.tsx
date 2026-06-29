@@ -874,32 +874,72 @@ function CurrentGradesPage() {
 function RegistrationPage() {
   const { data: opened, loading, error, refetch } = useData(() => api.registrationOpened());
   const { data: rules } = useData(() => api.registrationRules());
+  const [selected, setSelected] = React.useState<Record<string, "study" | "exam">>({});
+  const [submitting, setSubmitting] = React.useState(false);
+  const [result, setResult] = React.useState<{ success: boolean; message: string } | null>(null);
+  const [confirm, setConfirm] = React.useState(false);
 
   if (loading) return <LoadingBlock />;
   if (error) return <ErrorBlock message={error} onRetry={refetch} />;
 
   const courses = ((opened as { courses?: unknown[] } | null)?.courses ?? []) as Array<{
-    course_name: string; course_code: string; course_credits: string;
+    course_id: string; course_name: string; course_code: string; course_credits: string;
     requirement_type: string; allow_register: string; allow_exam: string;
-    status_reason: string; is_requestable: string; year_order: string; color?: string;
+    status_reason: string; is_requestable: string; year_order: string;
   }>;
-  const rulesList = (rules as Array<{ rule: string; value: string; description: string }> | null) ?? [];
-
+  const rulesList = (rules as Array<{ rule: string; value: string }> | null) ?? [];
   const canRegister = courses.filter(c => c.is_requestable === 'Y');
-  const cannotRegister = courses.filter(c => c.is_requestable !== 'Y');
+
+  const toggle = (id: string, type: "study" | "exam") => {
+    setSelected(prev => {
+      if (prev[id] === type) {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      }
+      return { ...prev, [id]: type };
+    });
+    setResult(null);
+  };
+
+  const selectedCount = Object.keys(selected).length;
+
+  const handleSubmit = async () => {
+    setConfirm(false);
+    setSubmitting(true);
+    setResult(null);
+    try {
+      const courseIds = Object.entries(selected).filter(([,t]) => t === "study").map(([id]) => id);
+      const onlyExamIds = Object.entries(selected).filter(([,t]) => t === "exam").map(([id]) => id);
+      const res = await api.submitRegistration({ courseIds, onlyExamIds });
+      const r = res as { success?: boolean; message?: string; errorMessages?: string[] };
+      if (r.success) {
+        setResult({ success: true, message: "تم إرسال طلب التسجيل بنجاح ✓" });
+        setSelected({});
+        refetch();
+      } else {
+        const msg = r.errorMessages?.join(" | ") ?? r.message ?? "حدث خطأ أثناء التسجيل";
+        setResult({ success: false, message: msg });
+      }
+    } catch (e: unknown) {
+      setResult({ success: false, message: e instanceof Error ? e.message : "خطأ في الاتصال" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="space-y-5 fade-in">
       <SectionTitle>تسجيل المقررات</SectionTitle>
 
-      {/* Rules summary */}
+      {/* Rules */}
       {rulesList.length > 0 && (
         <Card>
           <SectionTitle>قواعد التسجيل</SectionTitle>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {rulesList.map((r, i) => (
               <div key={i} className="bg-gray-50 rounded-xl px-4 py-3">
-                <p className="text-xs text-gray-500 mb-0.5">{r.rule}</p>
+                <p className="text-xs text-gray-400 mb-0.5">{r.rule}</p>
                 <p className="font-semibold text-sm text-gray-800">{r.value}</p>
               </div>
             ))}
@@ -907,46 +947,84 @@ function RegistrationPage() {
         </Card>
       )}
 
-      {/* Available to register */}
+      {/* Result banner */}
+      {result && (
+        <div className={`rounded-xl px-4 py-3 text-sm font-medium ${result.success ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-red-50 text-red-600 border border-red-200"}`}>
+          {result.message}
+        </div>
+      )}
+
+      {/* Confirm dialog */}
+      {confirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl p-6 shadow-xl max-w-sm w-full text-center space-y-4">
+            <p className="text-lg font-bold text-gray-800">تأكيد التسجيل</p>
+            <p className="text-sm text-gray-500">سيتم إرسال طلب تسجيل <span className="font-bold text-gray-700">{selectedCount} مقرر</span> إلى الجامعة. هل أنت متأكد؟</p>
+            <div className="flex gap-3 justify-center">
+              <button onClick={handleSubmit} className="bg-emerald-500 text-white px-6 py-2 rounded-xl font-semibold text-sm hover:bg-emerald-600 transition-colors">
+                نعم، سجّل
+              </button>
+              <button onClick={() => setConfirm(false)} className="bg-gray-100 text-gray-600 px-6 py-2 rounded-xl font-semibold text-sm hover:bg-gray-200 transition-colors">
+                إلغاء
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Courses list */}
       <Card>
-        <SectionTitle>مقررات يمكن تسجيلها ({canRegister.length})</SectionTitle>
+        <div className="flex items-center justify-between mb-4">
+          <SectionTitle>المقررات المتاحة للتسجيل ({canRegister.length})</SectionTitle>
+          {selectedCount > 0 && (
+            <button
+              onClick={() => setConfirm(true)}
+              disabled={submitting}
+              className="bg-blue-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1"
+            >
+              {submitting ? "جاري الإرسال..." : `تسجيل ${selectedCount} مقرر`}
+            </button>
+          )}
+        </div>
+
         {canRegister.length === 0 ? (
           <p className="text-center text-gray-400 py-8 text-sm">لا توجد مقررات متاحة للتسجيل حالياً</p>
         ) : (
           <div className="space-y-2">
-            {canRegister.map((c, i) => (
-              <div key={i} className="flex items-center justify-between bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
-                <div>
-                  <p className="font-medium text-sm text-gray-800">{c.course_name}</p>
-                  <p className="text-xs text-gray-500">{c.course_code} · {c.requirement_type}</p>
+            {canRegister.map((c) => {
+              const sel = selected[c.course_id];
+              return (
+                <div key={c.course_id} className={`border rounded-xl px-4 py-3 transition-colors ${sel ? "border-blue-300 bg-blue-50" : "border-gray-100 bg-gray-50"}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm text-gray-800 leading-snug">{c.course_name}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{c.course_code} · {c.requirement_type} · {c.course_credits} ساعة</p>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      {c.allow_register === 'Y' && (
+                        <button
+                          onClick={() => toggle(c.course_id, "study")}
+                          className={`text-xs px-2 py-1 rounded-lg font-medium border transition-colors ${sel === "study" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:border-blue-300"}`}
+                        >
+                          دراسة
+                        </button>
+                      )}
+                      {c.allow_exam === 'Y' && (
+                        <button
+                          onClick={() => toggle(c.course_id, "exam")}
+                          className={`text-xs px-2 py-1 rounded-lg font-medium border transition-colors ${sel === "exam" ? "bg-amber-500 text-white border-amber-500" : "bg-white text-gray-600 border-gray-200 hover:border-amber-300"}`}
+                        >
+                          امتحان
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div className="text-left shrink-0 mr-3">
-                  <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full font-medium block text-center">{c.course_credits} ساعة</span>
-                  <span className="text-xs text-emerald-600 mt-1 block">{c.allow_exam === 'Y' ? 'امتحان ✓' : ''}</span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Card>
-
-      {/* Cannot register */}
-      {cannotRegister.length > 0 && (
-        <Card>
-          <SectionTitle>مقررات غير متاحة ({cannotRegister.length})</SectionTitle>
-          <div className="space-y-2">
-            {cannotRegister.map((c, i) => (
-              <div key={i} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 opacity-70">
-                <div>
-                  <p className="font-medium text-sm text-gray-800">{c.course_name}</p>
-                  <p className="text-xs text-red-400">{c.status_reason}</p>
-                </div>
-                <span className="text-xs bg-gray-200 text-gray-500 px-2 py-1 rounded-full shrink-0 mr-3">{c.course_credits} ساعة</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
     </div>
   );
 }
