@@ -259,7 +259,7 @@ function Sidebar({
 
       <aside
         className={`fixed top-0 right-0 h-full z-30 flex flex-col bg-[var(--aspu-green-dark)] text-white transition-all duration-300 shadow-2xl
-          ${collapsed ? "-translate-x-full md:translate-x-0 md:w-16" : "translate-x-0 w-[260px]"}`}
+          ${collapsed ? "translate-x-full md:translate-x-0 md:w-16 w-[260px]" : "translate-x-0 w-[260px]"}`}
         style={{ direction: "rtl" }}
       >
         {/* Header */}
