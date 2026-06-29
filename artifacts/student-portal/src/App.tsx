@@ -1,191 +1,317 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
+import {
+  LayoutDashboard, BookOpen, GraduationCap, Calendar,
+  Wallet, ListChecks, LogOut, Menu, X, ChevronDown,
+  User, AlertCircle, Loader2, RefreshCw, Bell,
+} from "lucide-react";
+import {
+  api, login, logout, getToken, setToken, clearToken,
+  type PersonalProfile, type AcademicProfile, type FinancialProfile,
+  type GradesData, type Semester, type RemainingCourses,
+  type ScheduleData, type ExamData,
+} from "./lib/api";
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-type Page = "login" | "dashboard" | "courses" | "grades" | "schedule" | "announcements";
-
-interface Student {
-  name: string;
-  id: string;
-  major: string;
-  year: string;
-  gpa: string;
-  avatar: string;
+function gradeClass(g: string | null): string {
+  if (!g) return "bg-gray-100 text-gray-500";
+  const u = g.toUpperCase();
+  if (u.startsWith("A")) return "grade-a";
+  if (u.startsWith("B")) return "grade-b";
+  if (u.startsWith("C")) return "grade-c";
+  if (u.startsWith("D")) return "grade-d";
+  return "grade-f";
 }
 
-// ── Mock data ────────────────────────────────────────────────────────────────
-
-const STUDENT: Student = {
-  name: "أحمد محمد السيد",
-  id: "2021030045",
-  major: "التربية البدنية",
-  year: "السنة الثالثة",
-  gpa: "3.72",
-  avatar: "أ",
-};
-
-const COURSES = [
-  { code: "PE301", name: "فسيولوجيا الرياضة", credits: 3, instructor: "د. سامي العمر", time: "السبت 8:00 - 9:30", room: "قاعة 201", status: "مسجّل" },
-  { code: "PE305", name: "علم الحركة الرياضية", credits: 3, instructor: "د. نادية حسن", time: "الأحد 10:00 - 11:30", room: "قاعة 105", status: "مسجّل" },
-  { code: "PE310", name: "التدريب الرياضي", credits: 4, instructor: "أ.د. خالد الزهراني", time: "الاثنين 8:00 - 10:00", room: "الملعب الرئيسي", status: "مسجّل" },
-  { code: "PE315", name: "الإصابات الرياضية", credits: 3, instructor: "د. ريم الشمري", time: "الثلاثاء 12:00 - 13:30", room: "مختبر 3", status: "مسجّل" },
-  { code: "GE201", name: "اللغة الإنجليزية", credits: 2, instructor: "أ. فاطمة الحربي", time: "الأربعاء 14:00 - 15:30", room: "قاعة 310", status: "مسجّل" },
-];
-
-const GRADES = [
-  { semester: "الفصل الأول 2023/2024", courses: [
-    { name: "علم وظائف الأعضاء", credits: 3, grade: "A", points: 4.0, score: 93 },
-    { name: "مناهج البحث العلمي", credits: 3, grade: "A-", points: 3.7, score: 90 },
-    { name: "تاريخ الرياضة", credits: 2, grade: "B+", points: 3.3, score: 87 },
-    { name: "التربية البدنية التطبيقية", credits: 3, grade: "A", points: 4.0, score: 95 },
-    { name: "اللغة الإنجليزية 3", credits: 2, grade: "B", points: 3.0, score: 82 },
-  ]},
-];
-
-const SCHEDULE = [
-  { day: "السبت",    slots: [{ time: "8:00 - 9:30", subject: "فسيولوجيا الرياضة", room: "201", type: "نظري" }, { time: "14:00 - 15:30", subject: "—", room: "", type: "" }] },
-  { day: "الأحد",   slots: [{ time: "10:00 - 11:30", subject: "علم الحركة الرياضية", room: "105", type: "نظري" }, { time: "13:00 - 14:30", subject: "الإصابات الرياضية — مختبر", room: "L3", type: "عملي" }] },
-  { day: "الاثنين", slots: [{ time: "8:00 - 10:00", subject: "التدريب الرياضي", room: "ملعب", type: "عملي" }] },
-  { day: "الثلاثاء",slots: [{ time: "12:00 - 13:30", subject: "الإصابات الرياضية", room: "L3", type: "نظري" }] },
-  { day: "الأربعاء",slots: [{ time: "14:00 - 15:30", subject: "اللغة الإنجليزية", room: "310", type: "نظري" }] },
-];
-
-const ANNOUNCEMENTS = [
-  { id: 1, title: "موعد تسجيل المقررات للفصل القادم", date: "2026-06-25", category: "تسجيل", urgent: true, body: "يُذكر جميع الطلاب بأن تسجيل المقررات للفصل الثاني 2025/2026 سيبدأ يوم الأحد الموافق 6 يوليو 2026. يُرجى مراجعة الخطة الدراسية والتواصل مع المرشد الأكاديمي قبل التسجيل." },
-  { id: 2, title: "الجدول النهائي للاختبارات", date: "2026-06-20", category: "اختبارات", urgent: false, body: "تم نشر الجدول النهائي للاختبارات النهائية للفصل الأول. يمكن الاطلاع عليه من خلال بوابة الطالب أو من لوحة الإعلانات الرئيسية في المبنى الإداري." },
-  { id: 3, title: "ورشة عمل: التغذية الرياضية", date: "2026-06-18", category: "فعاليات", urgent: false, body: "تدعوكم عمادة شؤون الطلاب إلى حضور ورشة العمل المتخصصة في التغذية الرياضية التي ستُعقد يوم الخميس 2 يوليو 2026 في قاعة المؤتمرات الكبرى." },
-  { id: 4, title: "تعليمات الغياب والحضور", date: "2026-06-10", category: "أكاديمي", urgent: false, body: "يُذكر الطلاب بأن نسبة الغياب المسموح بها هي 25% من إجمالي المحاضرات. الطلاب الذين تتجاوز نسبة غيابهم هذه الحد المسموح به سيُحرمون من الاختبار النهائي." },
-];
-
-// ── Utility ──────────────────────────────────────────────────────────────────
-
-function gradeColor(grade: string) {
-  if (grade.startsWith("A")) return "#1a8c5a";
-  if (grade.startsWith("B")) return "#2d6cc0";
-  if (grade.startsWith("C")) return "#c8973a";
-  return "#c0392b";
+function gradePercent(pct: string | null): string {
+  if (!pct) return "-";
+  const n = parseFloat(pct);
+  if (n >= 90) return "text-emerald-600";
+  if (n >= 75) return "text-blue-600";
+  if (n >= 60) return "text-yellow-600";
+  if (n >= 50) return "text-orange-500";
+  return "text-red-600";
 }
 
-function categoryColor(cat: string) {
-  const map: Record<string, string> = { تسجيل: "#2d6cc0", اختبارات: "#c0392b", فعاليات: "#1a8c5a", أكاديمي: "#c8973a" };
-  return map[cat] ?? "#5a6378";
+// ─── Shared UI ────────────────────────────────────────────────────────────────
+
+function Spinner({ size = 20 }: { size?: number }) {
+  return (
+    <Loader2
+      size={size}
+      className="animate-spin text-[var(--aspu-green)]"
+    />
+  );
 }
 
-// ── Login Page ───────────────────────────────────────────────────────────────
+function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={`bg-white rounded-2xl shadow-sm border border-gray-100 p-5 ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: ReactNode }) {
+  return (
+    <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+      <span className="w-1 h-5 bg-[var(--aspu-green)] rounded-full inline-block" />
+      {children}
+    </h2>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string | null | undefined }) {
+  return (
+    <div className="flex items-start justify-between py-2.5 border-b border-gray-50 last:border-0">
+      <span className="text-sm text-gray-500 min-w-[130px]">{label}</span>
+      <span className="text-sm font-medium text-gray-800 text-left">{value ?? "—"}</span>
+    </div>
+  );
+}
+
+function LoadingBlock() {
+  return (
+    <div className="flex flex-col items-center justify-center py-20 gap-3">
+      <Spinner size={32} />
+      <p className="text-gray-400 text-sm">جاري التحميل…</p>
+    </div>
+  );
+}
+
+function ErrorBlock({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-20 gap-4">
+      <AlertCircle size={40} className="text-red-400" />
+      <p className="text-gray-600 text-sm">{message}</p>
+      <button
+        onClick={onRetry}
+        className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 transition"
+      >
+        <RefreshCw size={14} />
+        إعادة المحاولة
+      </button>
+    </div>
+  );
+}
+
+// ─── useData hook ─────────────────────────────────────────────────────────────
+
+function useData<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    fetcher()
+      .then((d) => {
+        setData(d);
+        setLoading(false);
+      })
+      .catch((e: Error) => {
+        if (e.message === "SESSION_EXPIRED") {
+          window.dispatchEvent(new Event("session-expired"));
+          return;
+        }
+        setError(e.message || "حدث خطأ غير متوقع");
+        setLoading(false);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+
+  useEffect(() => { load(); }, [load]);
+
+  return { data, loading, error, refetch: load };
+}
+
+// ─── Login Page ───────────────────────────────────────────────────────────────
 
 function LoginPage({ onLogin }: { onLogin: () => void }) {
-  const [id, setId] = useState("");
-  const [pass, setPass] = useState("");
-  const [error, setError] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  function handle(e: React.FormEvent) {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
-    if (!id || !pass) { setError("يُرجى إدخال رقم الطالب وكلمة المرور"); return; }
+    if (!username.trim() || !password) return;
     setLoading(true);
-    setTimeout(() => { setLoading(false); onLogin(); }, 1000);
-  }
+    setError("");
+    try {
+      const token = await login(username.trim(), password);
+      setToken(token);
+      onLogin();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg, #0f2b5a 0%, #1a4b8c 50%, #1e5fa8 100%)", padding: "1rem" }}>
-      <div style={{ width: "100%", maxWidth: 400 }}>
-        {/* Logo */}
-        <div style={{ textAlign: "center", marginBottom: "2rem" }}>
-          <div style={{ width: 80, height: 80, background: "rgba(255,255,255,0.1)", border: "3px solid rgba(200,151,58,0.8)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 1rem", backdropFilter: "blur(8px)" }}>
-            <span style={{ fontSize: 32, color: "#c8973a" }}>🎓</span>
+    <div className="min-h-screen bg-gradient-to-br from-[var(--aspu-green-dark)] via-[var(--aspu-green)] to-emerald-500 flex items-center justify-center p-4">
+      <div className="w-full max-w-sm fade-in">
+        {/* Logo / Brand */}
+        <div className="text-center mb-8">
+          <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
+            <GraduationCap size={40} className="text-[var(--aspu-green)]" />
           </div>
-          <h1 style={{ color: "#fff", fontSize: "1.5rem", fontWeight: 700, margin: 0 }}>بوابة الطالب</h1>
-          <p style={{ color: "rgba(255,255,255,0.65)", margin: "0.25rem 0 0", fontSize: "0.9rem" }}>الجامعة الرياضية العربية ASPU</p>
+          <h1 className="text-2xl font-bold text-white">بوابة الطالب</h1>
+          <p className="text-emerald-100 text-sm mt-1">جامعة الشام الخاصة — ASPU</p>
         </div>
 
-        {/* Card */}
-        <div style={{ background: "#fff", borderRadius: 16, padding: "2rem", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-          <h2 style={{ margin: "0 0 1.5rem", fontSize: "1.1rem", color: "#1a1f2e", fontWeight: 600 }}>تسجيل الدخول</h2>
-          <form onSubmit={handle}>
-            <div style={{ marginBottom: "1rem" }}>
-              <label style={{ display: "block", fontSize: "0.85rem", color: "#5a6378", marginBottom: "0.4rem", fontWeight: 500 }}>رقم الطالب</label>
-              <input value={id} onChange={e => setId(e.target.value)} placeholder="مثال: 2021030045" style={{ width: "100%", padding: "0.65rem 0.9rem", border: "1.5px solid #dde3ee", borderRadius: 8, fontSize: "0.95rem", outline: "none", boxSizing: "border-box", transition: "border 0.2s" }} onFocus={e => (e.target.style.border = "1.5px solid #2d6cc0")} onBlur={e => (e.target.style.border = "1.5px solid #dde3ee")} />
+        {/* Form */}
+        <div className="bg-white rounded-2xl shadow-2xl p-7">
+          <h2 className="text-lg font-bold text-gray-800 mb-5">تسجيل الدخول</h2>
+
+          {error && (
+            <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3 mb-4">
+              <AlertCircle size={16} className="shrink-0" />
+              {error}
             </div>
-            <div style={{ marginBottom: "1.25rem" }}>
-              <label style={{ display: "block", fontSize: "0.85rem", color: "#5a6378", marginBottom: "0.4rem", fontWeight: 500 }}>كلمة المرور</label>
-              <input type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="••••••••" style={{ width: "100%", padding: "0.65rem 0.9rem", border: "1.5px solid #dde3ee", borderRadius: 8, fontSize: "0.95rem", outline: "none", boxSizing: "border-box", transition: "border 0.2s" }} onFocus={e => (e.target.style.border = "1.5px solid #2d6cc0")} onBlur={e => (e.target.style.border = "1.5px solid #dde3ee")} />
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                اسم المستخدم
+              </label>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--aspu-green)] focus:border-transparent transition"
+                placeholder="أدخل اسم المستخدم"
+                autoComplete="username"
+                dir="ltr"
+                disabled={loading}
+              />
             </div>
-            {error && <p style={{ color: "#c0392b", fontSize: "0.83rem", margin: "0 0 1rem", background: "#fff0ee", padding: "0.5rem 0.75rem", borderRadius: 6 }}>{error}</p>}
-            <button type="submit" disabled={loading} style={{ width: "100%", padding: "0.75rem", background: loading ? "#8baed4" : "#1a4b8c", color: "#fff", border: "none", borderRadius: 8, fontSize: "1rem", fontWeight: 600, cursor: loading ? "default" : "pointer", transition: "background 0.2s" }}>
-              {loading ? "جاري تسجيل الدخول..." : "دخول"}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                كلمة المرور
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--aspu-green)] focus:border-transparent transition"
+                placeholder="أدخل كلمة المرور"
+                autoComplete="current-password"
+                dir="ltr"
+                disabled={loading}
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading || !username.trim() || !password}
+              className="w-full bg-[var(--aspu-green)] hover:bg-[var(--aspu-green-dark)] disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-lg transition flex items-center justify-center gap-2"
+            >
+              {loading ? <Spinner size={18} /> : null}
+              {loading ? "جاري التحقق…" : "دخول"}
             </button>
           </form>
-          <p style={{ textAlign: "center", fontSize: "0.82rem", color: "#5a6378", marginTop: "1rem", marginBottom: 0 }}>
-            نسيت كلمة المرور؟ <a href="#" style={{ color: "#2d6cc0", textDecoration: "none" }}>استعادة الحساب</a>
+
+          <p className="text-xs text-gray-400 text-center mt-5">
+            يتم استخدام نفس بيانات دخول بوابة ASPU
           </p>
         </div>
-        <p style={{ color: "rgba(255,255,255,0.4)", textAlign: "center", fontSize: "0.75rem", marginTop: "1.5rem" }}>
-          © 2024 ASPU — جميع الحقوق محفوظة
-        </p>
       </div>
     </div>
   );
 }
 
-// ── Sidebar ──────────────────────────────────────────────────────────────────
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-const NAV = [
-  { id: "dashboard",      label: "الرئيسية",        icon: "🏠" },
-  { id: "courses",        label: "مقرراتي",          icon: "📚" },
-  { id: "grades",         label: "الدرجات",          icon: "📊" },
-  { id: "schedule",       label: "الجدول الدراسي",   icon: "📅" },
-  { id: "announcements",  label: "الإعلانات",        icon: "📢" },
+type Page = "overview" | "grades" | "profile" | "financial" | "schedule" | "courses";
+
+const NAV_ITEMS: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: "overview",  label: "الرئيسية",        icon: LayoutDashboard },
+  { id: "grades",    label: "النتائج والعلامات", icon: BookOpen },
+  { id: "schedule",  label: "الجدول الدراسي",   icon: Calendar },
+  { id: "profile",   label: "ملفي الشخصي",     icon: User },
+  { id: "financial", label: "الوضع المالي",    icon: Wallet },
+  { id: "courses",   label: "المواد المتبقية",  icon: ListChecks },
 ];
 
-function Sidebar({ page, onNav, onLogout, open, onClose }: { page: Page; onNav: (p: Page) => void; onLogout: () => void; open: boolean; onClose: () => void }) {
+function Sidebar({
+  page, setPage, onLogout, collapsed, setCollapsed, username,
+}: {
+  page: Page;
+  setPage: (p: Page) => void;
+  onLogout: () => void;
+  collapsed: boolean;
+  setCollapsed: (v: boolean) => void;
+  username: string;
+}) {
   return (
     <>
       {/* Overlay on mobile */}
-      {open && <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 99, display: "block" }} />}
+      {!collapsed && (
+        <div
+          className="fixed inset-0 bg-black/40 z-20 md:hidden"
+          onClick={() => setCollapsed(true)}
+        />
+      )}
 
-      <aside style={{
-        position: "fixed", top: 0, right: 0, bottom: 0, width: 240,
-        background: "linear-gradient(180deg, #0f2b5a 0%, #1a4b8c 100%)",
-        display: "flex", flexDirection: "column", zIndex: 100,
-        transform: open ? "translateX(0)" : "translateX(100%)",
-        transition: "transform 0.3s ease",
-        boxShadow: "-4px 0 20px rgba(0,0,0,0.2)",
-      }}>
+      <aside
+        className={`fixed top-0 right-0 h-full z-30 flex flex-col bg-[var(--aspu-green-dark)] text-white transition-all duration-300 shadow-2xl
+          ${collapsed ? "-translate-x-full md:translate-x-0 md:w-16" : "translate-x-0 w-[260px]"}`}
+        style={{ direction: "rtl" }}
+      >
         {/* Header */}
-        <div style={{ padding: "1.5rem 1.25rem 1rem", borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-            <div style={{ width: 40, height: 40, borderRadius: "50%", background: "rgba(200,151,58,0.25)", border: "2px solid rgba(200,151,58,0.7)", display: "flex", alignItems: "center", justifyContent: "center", color: "#c8973a", fontWeight: 700, fontSize: "1rem", flexShrink: 0 }}>
-              {STUDENT.avatar}
-            </div>
-            <div style={{ overflow: "hidden" }}>
-              <p style={{ color: "#fff", fontWeight: 600, margin: 0, fontSize: "0.88rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{STUDENT.name}</p>
-              <p style={{ color: "rgba(255,255,255,0.5)", margin: 0, fontSize: "0.73rem" }}>{STUDENT.id}</p>
-            </div>
+        <div className="flex items-center gap-3 px-4 py-5 border-b border-white/10">
+          <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center shrink-0">
+            <GraduationCap size={22} className="text-white" />
           </div>
+          {!collapsed && (
+            <div className="overflow-hidden">
+              <p className="text-sm font-bold leading-tight truncate">بوابة الطالب</p>
+              <p className="text-xs text-emerald-200 truncate">ASPU</p>
+            </div>
+          )}
+          <button
+            onClick={() => setCollapsed(!collapsed)}
+            className="mr-auto p-1.5 rounded-lg hover:bg-white/10 transition hidden md:flex"
+          >
+            <Menu size={18} />
+          </button>
         </div>
 
+        {/* User badge */}
+        {!collapsed && (
+          <div className="mx-3 mt-3 px-3 py-2 bg-white/10 rounded-xl flex items-center gap-2">
+            <User size={16} className="text-emerald-200" />
+            <span className="text-sm truncate">{username}</span>
+          </div>
+        )}
+
         {/* Nav */}
-        <nav style={{ flex: 1, padding: "0.75rem 0", overflowY: "auto" }}>
-          {NAV.map(item => (
-            <button key={item.id} onClick={() => { onNav(item.id as Page); onClose(); }}
-              style={{
-                width: "100%", display: "flex", alignItems: "center", gap: "0.75rem",
-                padding: "0.7rem 1.25rem", border: "none", background: page === item.id ? "rgba(255,255,255,0.12)" : "transparent",
-                color: page === item.id ? "#fff" : "rgba(255,255,255,0.65)", fontSize: "0.9rem",
-                cursor: "pointer", textAlign: "right", borderRight: page === item.id ? "3px solid #c8973a" : "3px solid transparent",
-                transition: "all 0.15s",
-              }}>
-              <span style={{ fontSize: "1rem" }}>{item.icon}</span>
-              <span style={{ fontWeight: page === item.id ? 600 : 400 }}>{item.label}</span>
+        <nav className="flex-1 overflow-y-auto py-3 px-2">
+          {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => { setPage(id); setCollapsed(true); }}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 transition text-sm font-medium
+                ${page === id ? "bg-white/20 text-white" : "text-emerald-100 hover:bg-white/10 hover:text-white"}`}
+            >
+              <Icon size={18} className="shrink-0" />
+              {!collapsed && <span>{label}</span>}
             </button>
           ))}
         </nav>
 
         {/* Logout */}
-        <div style={{ padding: "1rem 1.25rem", borderTop: "1px solid rgba(255,255,255,0.1)" }}>
-          <button onClick={onLogout} style={{ width: "100%", display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.65rem 0.75rem", border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.7)", borderRadius: 8, cursor: "pointer", fontSize: "0.88rem" }}>
-            <span>🚪</span> <span>تسجيل الخروج</span>
+        <div className="p-3 border-t border-white/10">
+          <button
+            onClick={onLogout}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-red-300 hover:bg-red-900/30 transition"
+          >
+            <LogOut size={18} className="shrink-0" />
+            {!collapsed && <span>تسجيل الخروج</span>}
           </button>
         </div>
       </aside>
@@ -193,273 +319,583 @@ function Sidebar({ page, onNav, onLogout, open, onClose }: { page: Page; onNav: 
   );
 }
 
-// ── Layout ───────────────────────────────────────────────────────────────────
+// ─── Pages ────────────────────────────────────────────────────────────────────
 
-function Layout({ page, onNav, onLogout, children }: { page: Page; onNav: (p: Page) => void; onLogout: () => void; children: React.ReactNode }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const pageLabel = NAV.find(n => n.id === page)?.label ?? "";
+function OverviewPage({ username }: { username: string }) {
+  const { data: dash, loading, error, refetch } = useData(() => api.dashboard());
+  const { data: academic } = useData(() => api.academic());
+  const { data: announcements } = useData(() => api.announcements());
+
+  if (loading) return <LoadingBlock />;
+  if (error) return <ErrorBlock message={error} onRetry={refetch} />;
+
+  const acad = academic as AcademicProfile | null;
+  const anns = (announcements ?? []) as Array<{ title: string; body: string; date: string }>;
+  const dashData = dash as { first_name?: string } | null;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f4f7fb" }}>
-      <Sidebar page={page} onNav={onNav} onLogout={onLogout} open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-
-      {/* Top bar */}
-      <header style={{ position: "sticky", top: 0, zIndex: 50, background: "#fff", borderBottom: "1px solid #dde3ee", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 1.25rem", height: 58, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          <button onClick={() => setSidebarOpen(true)} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "1.3rem", padding: "0.25rem", color: "#1a4b8c" }}>☰</button>
-          <span style={{ fontSize: "0.95rem", fontWeight: 600, color: "#1a1f2e" }}>{pageLabel}</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          <span style={{ fontSize: "0.8rem", color: "#5a6378" }}>ASPU</span>
-          <div style={{ width: 32, height: 32, borderRadius: "50%", background: "#1a4b8c", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.85rem", fontWeight: 700 }}>{STUDENT.avatar}</div>
-        </div>
-      </header>
-
-      <main style={{ padding: "1.25rem", maxWidth: 900, margin: "0 auto" }}>
-        {children}
-      </main>
-    </div>
-  );
-}
-
-// ── Dashboard ─────────────────────────────────────────────────────────────────
-
-function StatCard({ label, value, color, icon }: { label: string; value: string; color: string; icon: string }) {
-  return (
-    <div style={{ background: "#fff", borderRadius: 12, padding: "1.25rem", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", borderTop: `3px solid ${color}` }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-        <span style={{ fontSize: "1.5rem" }}>{icon}</span>
-        <span style={{ background: color + "18", color, fontSize: "0.7rem", padding: "0.2rem 0.5rem", borderRadius: 20, fontWeight: 600 }}>الفصل الحالي</span>
-      </div>
-      <p style={{ margin: 0, fontSize: "1.8rem", fontWeight: 700, color: "#1a1f2e" }}>{value}</p>
-      <p style={{ margin: "0.25rem 0 0", fontSize: "0.8rem", color: "#5a6378" }}>{label}</p>
-    </div>
-  );
-}
-
-function Dashboard() {
-  return (
-    <div>
+    <div className="space-y-5 fade-in">
       {/* Welcome banner */}
-      <div style={{ background: "linear-gradient(135deg, #1a4b8c 0%, #2d6cc0 100%)", borderRadius: 14, padding: "1.5rem", marginBottom: "1.25rem", color: "#fff" }}>
-        <p style={{ margin: "0 0 0.25rem", fontSize: "0.85rem", opacity: 0.75 }}>مرحباً بك،</p>
-        <h2 style={{ margin: "0 0 0.25rem", fontSize: "1.4rem", fontWeight: 700 }}>{STUDENT.name}</h2>
-        <p style={{ margin: 0, fontSize: "0.82rem", opacity: 0.7 }}>{STUDENT.major} · {STUDENT.year}</p>
+      <div className="bg-gradient-to-l from-[var(--aspu-green)] to-emerald-400 text-white rounded-2xl p-6">
+        <p className="text-emerald-100 text-sm">مرحباً بك،</p>
+        <h2 className="text-2xl font-bold mt-0.5">{dashData?.first_name ?? username} 👋</h2>
+        {acad && (
+          <p className="text-emerald-100 text-sm mt-2">
+            {acad.faculty} — {acad.level}
+          </p>
+        )}
       </div>
 
-      {/* Stats */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "1rem", marginBottom: "1.25rem" }}>
-        <StatCard label="المعدل التراكمي" value={STUDENT.gpa} color="#1a4b8c" icon="🎯" />
-        <StatCard label="المقررات المسجّلة" value="5" color="#1a8c5a" icon="📚" />
-        <StatCard label="الساعات المعتمدة" value="72" color="#c8973a" icon="⏱️" />
-        <StatCard label="الفصل الدراسي" value="5" color="#2d6cc0" icon="📅" />
-      </div>
-
-      {/* Quick info */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-        {/* Today's courses */}
-        <div style={{ background: "#fff", borderRadius: 12, padding: "1.25rem", boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
-          <h3 style={{ margin: "0 0 1rem", fontSize: "0.9rem", color: "#1a1f2e", fontWeight: 600, display: "flex", alignItems: "center", gap: "0.4rem" }}>
-            <span>📅</span> محاضرات اليوم
-          </h3>
-          {SCHEDULE[0].slots.filter(s => s.subject !== "—").map((s, i) => (
-            <div key={i} style={{ padding: "0.6rem 0.75rem", background: "#f4f7fb", borderRadius: 8, marginBottom: "0.5rem", borderRight: "3px solid #1a4b8c" }}>
-              <p style={{ margin: 0, fontWeight: 600, fontSize: "0.85rem", color: "#1a1f2e" }}>{s.subject}</p>
-              <p style={{ margin: "0.15rem 0 0", fontSize: "0.75rem", color: "#5a6378" }}>{s.time} · قاعة {s.room}</p>
-            </div>
+      {/* Quick stats */}
+      {acad && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[
+            { label: "المعدل التراكمي", value: acad.agpa },
+            { label: "الفصل الدراسي", value: acad.applying_semester },
+            { label: "الساعات المعتمدة", value: `${acad.credits} ساعة` },
+            { label: "الإنذار الأكاديمي", value: acad.warning_status },
+          ].map((item) => (
+            <Card key={item.label} className="text-center !p-4">
+              <p className="text-xs text-gray-400 mb-1">{item.label}</p>
+              <p className="text-sm font-bold text-gray-800 leading-snug">{item.value}</p>
+            </Card>
           ))}
-        </div>
-
-        {/* Latest announcement */}
-        <div style={{ background: "#fff", borderRadius: 12, padding: "1.25rem", boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
-          <h3 style={{ margin: "0 0 1rem", fontSize: "0.9rem", color: "#1a1f2e", fontWeight: 600, display: "flex", alignItems: "center", gap: "0.4rem" }}>
-            <span>📢</span> آخر الإعلانات
-          </h3>
-          {ANNOUNCEMENTS.slice(0, 2).map(a => (
-            <div key={a.id} style={{ padding: "0.6rem 0.75rem", background: a.urgent ? "#fff8f0" : "#f4f7fb", borderRadius: 8, marginBottom: "0.5rem", borderRight: `3px solid ${categoryColor(a.category)}` }}>
-              <p style={{ margin: 0, fontWeight: 600, fontSize: "0.82rem", color: "#1a1f2e" }}>{a.title}</p>
-              <p style={{ margin: "0.15rem 0 0", fontSize: "0.73rem", color: "#5a6378" }}>{a.date}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Courses ───────────────────────────────────────────────────────────────────
-
-function CoursesPage() {
-  return (
-    <div>
-      <h2 style={{ margin: "0 0 1rem", fontSize: "1.1rem", fontWeight: 700, color: "#1a1f2e" }}>مقرراتي المسجّلة</h2>
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-        {COURSES.map(c => (
-          <div key={c.code} style={{ background: "#fff", borderRadius: 12, padding: "1.1rem 1.25rem", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.75rem" }}>
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.25rem" }}>
-                <span style={{ fontSize: "0.72rem", background: "#1a4b8c18", color: "#1a4b8c", padding: "0.15rem 0.45rem", borderRadius: 4, fontWeight: 600 }}>{c.code}</span>
-                <span style={{ fontSize: "0.72rem", background: "#1a8c5a18", color: "#1a8c5a", padding: "0.15rem 0.45rem", borderRadius: 4 }}>{c.credits} ساعات</span>
-              </div>
-              <p style={{ margin: 0, fontWeight: 700, fontSize: "0.95rem", color: "#1a1f2e" }}>{c.name}</p>
-              <p style={{ margin: "0.2rem 0 0", fontSize: "0.8rem", color: "#5a6378" }}>
-                {c.instructor} · {c.time} · {c.room}
-              </p>
-            </div>
-            <span style={{ background: "#1a8c5a18", color: "#1a8c5a", fontSize: "0.78rem", padding: "0.2rem 0.6rem", borderRadius: 6, fontWeight: 600 }}>{c.status}</span>
-          </div>
-        ))}
-      </div>
-      <div style={{ marginTop: "1rem", background: "#fff", borderRadius: 12, padding: "1rem 1.25rem", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", display: "flex", gap: "2rem" }}>
-        <div><span style={{ color: "#5a6378", fontSize: "0.83rem" }}>إجمالي المقررات</span><p style={{ margin: "0.25rem 0 0", fontWeight: 700, fontSize: "1.2rem", color: "#1a4b8c" }}>5</p></div>
-        <div><span style={{ color: "#5a6378", fontSize: "0.83rem" }}>إجمالي الساعات</span><p style={{ margin: "0.25rem 0 0", fontWeight: 700, fontSize: "1.2rem", color: "#1a4b8c" }}>{COURSES.reduce((s, c) => s + c.credits, 0)}</p></div>
-      </div>
-    </div>
-  );
-}
-
-// ── Grades ────────────────────────────────────────────────────────────────────
-
-function GradesPage() {
-  const sem = GRADES[0];
-  const gpa = (sem.courses.reduce((s, c) => s + c.points * c.credits, 0) / sem.courses.reduce((s, c) => s + c.credits, 0)).toFixed(2);
-  return (
-    <div>
-      <h2 style={{ margin: "0 0 0.25rem", fontSize: "1.1rem", fontWeight: 700, color: "#1a1f2e" }}>نتائج الدرجات</h2>
-      <p style={{ margin: "0 0 1rem", fontSize: "0.82rem", color: "#5a6378" }}>{sem.semester}</p>
-
-      <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 8px rgba(0,0,0,0.06)", overflow: "hidden", marginBottom: "1rem" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.88rem" }}>
-            <thead>
-              <tr style={{ background: "#1a4b8c", color: "#fff" }}>
-                {["المقرر", "الساعات", "الدرجة", "النقاط", "العلامة %"].map(h => (
-                  <th key={h} style={{ padding: "0.75rem 1rem", textAlign: "right", fontWeight: 600 }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sem.courses.map((c, i) => (
-                <tr key={i} style={{ borderBottom: "1px solid #eef1f7", background: i % 2 === 0 ? "#fff" : "#f9fafc" }}>
-                  <td style={{ padding: "0.7rem 1rem", fontWeight: 500 }}>{c.name}</td>
-                  <td style={{ padding: "0.7rem 1rem", color: "#5a6378" }}>{c.credits}</td>
-                  <td style={{ padding: "0.7rem 1rem" }}>
-                    <span style={{ background: gradeColor(c.grade) + "18", color: gradeColor(c.grade), padding: "0.15rem 0.5rem", borderRadius: 5, fontWeight: 700 }}>{c.grade}</span>
-                  </td>
-                  <td style={{ padding: "0.7rem 1rem", color: "#5a6378" }}>{c.points.toFixed(1)}</td>
-                  <td style={{ padding: "0.7rem 1rem" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                      <div style={{ flex: 1, height: 6, background: "#eef1f7", borderRadius: 3, minWidth: 60 }}>
-                        <div style={{ width: `${c.score}%`, height: "100%", background: gradeColor(c.grade), borderRadius: 3 }} />
-                      </div>
-                      <span style={{ fontSize: "0.8rem", color: "#1a1f2e", minWidth: 28 }}>{c.score}%</span>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div style={{ background: "#1a4b8c", color: "#fff", borderRadius: 12, padding: "1rem 1.25rem", display: "flex", gap: "2rem" }}>
-        <div><p style={{ margin: 0, fontSize: "0.8rem", opacity: 0.75 }}>معدل الفصل</p><p style={{ margin: "0.25rem 0 0", fontSize: "1.6rem", fontWeight: 700 }}>{gpa}</p></div>
-        <div><p style={{ margin: 0, fontSize: "0.8rem", opacity: 0.75 }}>المعدل التراكمي</p><p style={{ margin: "0.25rem 0 0", fontSize: "1.6rem", fontWeight: 700 }}>{STUDENT.gpa}</p></div>
-        <div><p style={{ margin: 0, fontSize: "0.8rem", opacity: 0.75 }}>الساعات المنجزة</p><p style={{ margin: "0.25rem 0 0", fontSize: "1.6rem", fontWeight: 700 }}>72</p></div>
-      </div>
-    </div>
-  );
-}
-
-// ── Schedule ──────────────────────────────────────────────────────────────────
-
-function SchedulePage() {
-  return (
-    <div>
-      <h2 style={{ margin: "0 0 1rem", fontSize: "1.1rem", fontWeight: 700, color: "#1a1f2e" }}>الجدول الدراسي الأسبوعي</h2>
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-        {SCHEDULE.map(day => (
-          <div key={day.day} style={{ background: "#fff", borderRadius: 12, padding: "1rem 1.25rem", boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
-            <p style={{ margin: "0 0 0.75rem", fontWeight: 700, fontSize: "0.9rem", color: "#1a4b8c", display: "flex", alignItems: "center", gap: "0.4rem" }}>
-              <span>📅</span> {day.day}
-            </p>
-            {day.slots.map((s, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.5rem 0.75rem", background: s.subject === "—" ? "#f9fafc" : (s.type === "عملي" ? "#f0fff7" : "#f4f7fb"), borderRadius: 8, marginBottom: "0.4rem", borderRight: `3px solid ${s.type === "عملي" ? "#1a8c5a" : s.subject === "—" ? "#dde3ee" : "#1a4b8c"}` }}>
-                <span style={{ fontSize: "0.78rem", color: "#5a6378", minWidth: 80 }}>{s.time}</span>
-                <span style={{ fontWeight: s.subject === "—" ? 400 : 600, fontSize: "0.85rem", color: s.subject === "—" ? "#aab0c0" : "#1a1f2e" }}>{s.subject}</span>
-                {s.room && <span style={{ marginRight: "auto", fontSize: "0.73rem", color: "#5a6378", background: "#eef1f7", padding: "0.1rem 0.4rem", borderRadius: 4 }}>{s.type} · {s.room}</span>}
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Announcements ─────────────────────────────────────────────────────────────
-
-function AnnouncementsPage() {
-  const [selected, setSelected] = useState<number | null>(null);
-  const ann = selected !== null ? ANNOUNCEMENTS.find(a => a.id === selected) : null;
-
-  return (
-    <div>
-      <h2 style={{ margin: "0 0 1rem", fontSize: "1.1rem", fontWeight: 700, color: "#1a1f2e" }}>الإعلانات</h2>
-
-      {ann && (
-        <div style={{ background: "#fff", borderRadius: 12, padding: "1.25rem", boxShadow: "0 4px 16px rgba(0,0,0,0.1)", marginBottom: "1rem", border: "1px solid #dde3ee" }}>
-          <button onClick={() => setSelected(null)} style={{ border: "none", background: "none", cursor: "pointer", color: "#2d6cc0", fontSize: "0.83rem", padding: 0, marginBottom: "0.75rem" }}>← رجوع</button>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
-            <span style={{ background: categoryColor(ann.category) + "18", color: categoryColor(ann.category), fontSize: "0.73rem", padding: "0.15rem 0.45rem", borderRadius: 4, fontWeight: 600 }}>{ann.category}</span>
-            {ann.urgent && <span style={{ background: "#c0392b18", color: "#c0392b", fontSize: "0.73rem", padding: "0.15rem 0.45rem", borderRadius: 4, fontWeight: 600 }}>عاجل</span>}
-          </div>
-          <h3 style={{ margin: "0 0 0.35rem", fontSize: "1rem", color: "#1a1f2e" }}>{ann.title}</h3>
-          <p style={{ margin: "0 0 0.75rem", fontSize: "0.78rem", color: "#5a6378" }}>{ann.date}</p>
-          <p style={{ margin: 0, fontSize: "0.88rem", color: "#1a1f2e", lineHeight: 1.8 }}>{ann.body}</p>
         </div>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.65rem" }}>
-        {ANNOUNCEMENTS.map(a => (
-          <div key={a.id} onClick={() => setSelected(a.id)} style={{ background: a.urgent ? "#fff8f0" : "#fff", borderRadius: 12, padding: "1rem 1.25rem", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", cursor: "pointer", borderRight: `4px solid ${categoryColor(a.category)}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem" }}>
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: "0.25rem" }}>
-                <span style={{ background: categoryColor(a.category) + "18", color: categoryColor(a.category), fontSize: "0.7rem", padding: "0.1rem 0.4rem", borderRadius: 4, fontWeight: 600 }}>{a.category}</span>
-                {a.urgent && <span style={{ background: "#c0392b18", color: "#c0392b", fontSize: "0.7rem", padding: "0.1rem 0.4rem", borderRadius: 4, fontWeight: 600 }}>عاجل</span>}
-              </div>
-              <p style={{ margin: 0, fontWeight: 600, fontSize: "0.9rem", color: "#1a1f2e" }}>{a.title}</p>
-              <p style={{ margin: "0.15rem 0 0", fontSize: "0.75rem", color: "#5a6378" }}>{a.date}</p>
-            </div>
-            <span style={{ color: "#aab0c0", fontSize: "1.1rem", flexShrink: 0 }}>←</span>
+      {/* Announcements */}
+      <Card>
+        <SectionTitle>الإعلانات والأخبار</SectionTitle>
+        {anns.length === 0 ? (
+          <div className="flex flex-col items-center py-10 text-gray-300 gap-2">
+            <Bell size={32} />
+            <p className="text-sm">لا توجد إعلانات حالياً</p>
           </div>
-        ))}
+        ) : (
+          <div className="space-y-3">
+            {anns.slice(0, 10).map((a, i) => (
+              <div key={i} className="border border-gray-100 rounded-xl p-4">
+                <p className="font-semibold text-sm text-gray-800">{a.title}</p>
+                <p className="text-sm text-gray-500 mt-1">{a.body}</p>
+                {a.date && <p className="text-xs text-gray-300 mt-1">{a.date}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function GradesPage() {
+  const { data, loading, error, refetch } = useData(() => api.grades());
+  const [openSemester, setOpenSemester] = useState<string | null>(null);
+
+  if (loading) return <LoadingBlock />;
+  if (error) return <ErrorBlock message={error} onRetry={refetch} />;
+
+  const grades = data as GradesData | null;
+  const semesters = (grades?.semesters ?? []).filter(
+    (s) => s.semester_id !== "all" && s.courses.length > 0
+  );
+
+  return (
+    <div className="space-y-4 fade-in">
+      <SectionTitle>النتائج والعلامات</SectionTitle>
+
+      {semesters.length === 0 && (
+        <Card>
+          <p className="text-center text-gray-400 py-10">لا توجد نتائج متاحة</p>
+        </Card>
+      )}
+
+      {semesters.map((sem: Semester) => (
+        <Card key={sem.semester_id} className="!p-0 overflow-hidden">
+          {/* Semester header */}
+          <button
+            className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition text-right"
+            onClick={() =>
+              setOpenSemester(openSemester === sem.semester_id ? null : sem.semester_id)
+            }
+          >
+            <div className="flex items-center gap-3">
+              <span className="font-semibold text-gray-800 text-sm">{sem.semester_name}</span>
+              {sem.grade_name_sem && (
+                <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                  {sem.grade_name_sem}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-4">
+              {sem.gpa_percent && (
+                <span className={`font-bold text-sm ${gradePercent(sem.gpa_percent)}`}>
+                  {parseFloat(sem.gpa_percent).toFixed(1)}%
+                </span>
+              )}
+              {sem.end_agpa_percent && (
+                <span className="text-xs text-gray-400">
+                  تراكمي: {parseFloat(sem.end_agpa_percent).toFixed(1)}%
+                </span>
+              )}
+              <ChevronDown
+                size={16}
+                className={`text-gray-400 transition-transform ${openSemester === sem.semester_id ? "rotate-180" : ""}`}
+              />
+            </div>
+          </button>
+
+          {/* Courses table */}
+          {openSemester === sem.semester_id && (
+            <div className="border-t border-gray-100 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-500 text-xs">
+                    <th className="text-right px-5 py-2.5 font-medium">المادة</th>
+                    <th className="px-3 py-2.5 font-medium">ساعات</th>
+                    <th className="px-3 py-2.5 font-medium">الأعمال</th>
+                    <th className="px-3 py-2.5 font-medium">النهائي</th>
+                    <th className="px-3 py-2.5 font-medium">المجموع</th>
+                    <th className="px-3 py-2.5 font-medium">التقدير</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sem.courses.map((c) => (
+                    <tr key={c.course_id} className="border-t border-gray-50 hover:bg-gray-50/50">
+                      <td className="px-5 py-3">
+                        <p className="font-medium text-gray-800">{c.course_name}</p>
+                        <p className="text-xs text-gray-400">{c.course_code}</p>
+                      </td>
+                      <td className="px-3 py-3 text-center text-gray-600">{c.course_credits}</td>
+                      <td className="px-3 py-3 text-center text-gray-600 text-xs">
+                        {c.tests?.archive_fixed_mark ?? "—"}
+                      </td>
+                      <td className="px-3 py-3 text-center text-gray-600 text-xs">
+                        {c.tests?.archive_final_mark ?? "—"}
+                      </td>
+                      <td className={`px-3 py-3 text-center font-bold ${gradePercent(c.final_mark)}`}>
+                        {c.final_mark ?? "—"}
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${gradeClass(c.grade)}`}>
+                          {c.grade ?? "—"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-gray-50 text-xs text-gray-500 border-t border-gray-100">
+                    <td className="px-5 py-2.5 font-medium" colSpan={2}>
+                      إجمالي: {sem.end_total_in_credits} ساعة معتمدة
+                    </td>
+                    <td className="px-3 py-2.5 text-center" colSpan={2}>
+                      {sem.grade_name && `التقدير: ${sem.grade_name}`}
+                    </td>
+                    <td className={`px-3 py-2.5 text-center font-bold ${gradePercent(sem.gpa_percent)}`}>
+                      {sem.gpa_percent ? `${parseFloat(sem.gpa_percent).toFixed(1)}%` : ""}
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      {sem.gpa_points ? `${sem.gpa_points} pts` : ""}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+function ProfilePage() {
+  const { data: personal, loading: lp, error: ep, refetch: rp } = useData(() => api.personal());
+  const { data: academic, loading: la, error: ea, refetch: ra } = useData(() => api.academic());
+
+  if (lp || la) return <LoadingBlock />;
+  if (ep) return <ErrorBlock message={ep} onRetry={rp} />;
+  if (ea) return <ErrorBlock message={ea} onRetry={ra} />;
+
+  const p = personal as PersonalProfile | null;
+  const a = academic as AcademicProfile | null;
+
+  return (
+    <div className="space-y-5 fade-in">
+      {/* Personal header */}
+      {p && (
+        <Card className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
+          <img
+            src={p.picture}
+            alt="صورة الطالب"
+            className="w-24 h-24 rounded-2xl object-cover border-4 border-[var(--aspu-green-light)] shrink-0"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src =
+                "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23e8f5ee'/%3E%3Ctext x='50' y='55' text-anchor='middle' font-size='40' fill='%230a7c3e'%3E👤%3C/text%3E%3C/svg%3E";
+            }}
+          />
+          <div>
+            <h2 className="text-xl font-bold text-gray-800">
+              {p.first_name} {p.last_name}
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">{a?.faculty}</p>
+            <p className="text-sm text-[var(--aspu-green)] font-medium">{a?.degree}</p>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <span className="text-xs bg-[var(--aspu-green-light)] text-[var(--aspu-green)] px-3 py-1 rounded-full font-medium">
+                {a?.level}
+              </span>
+              <span className="text-xs bg-gray-100 text-gray-600 px-3 py-1 rounded-full">
+                رقم الطالب: {a?.student_num}
+              </span>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {p && (
+          <Card>
+            <SectionTitle>المعلومات الشخصية</SectionTitle>
+            <InfoRow label="الاسم الأول" value={p.first_name} />
+            <InfoRow label="اسم الأب" value={p.father_name} />
+            <InfoRow label="اسم الأم" value={p.mother_name} />
+            <InfoRow label="اللقب" value={p.last_name} />
+            <InfoRow label="مكان الولادة" value={p.birth_place} />
+            <InfoRow label="تاريخ الولادة" value={p.birth_date} />
+            <InfoRow label="الجنس" value={p.gender_name} />
+            <InfoRow label="الجنسية" value={p.nationality_name} />
+            <InfoRow label="رقم الهوية" value={p.identity_no} />
+            <InfoRow label="الرقم الوطني" value={p.national_no} />
+            <InfoRow label="البريد الإلكتروني" value={p.email} />
+            <InfoRow label="رقم الجوال" value={p.mobile} />
+          </Card>
+        )}
+
+        {a && (
+          <Card>
+            <SectionTitle>المعلومات الأكاديمية</SectionTitle>
+            <InfoRow label="رقم الطالب" value={a.student_num} />
+            <InfoRow label="الكلية" value={a.faculty} />
+            <InfoRow label="التخصص" value={a.degree} />
+            <InfoRow label="السنة الدراسية" value={a.level} />
+            <InfoRow label="الحالة" value={a.status} />
+            <InfoRow label="الفصل الحالي" value={a.applying_semester} />
+            <InfoRow label="الساعات المعتمدة" value={`${a.credits} ساعة`} />
+            <InfoRow label="المعدل التراكمي" value={a.agpa} />
+            <InfoRow label="تاريخ التسجيل" value={a.register_date} />
+            <InfoRow label="الإنذار الأكاديمي" value={a.warning_status} />
+            <InfoRow label="نوع الشهادة" value={a.diploma_type} />
+            <InfoRow label="علامة الشهادة" value={a.diploma_mark} />
+            <InfoRow label="معدل الشهادة" value={a.diploma_gpa} />
+          </Card>
+        )}
       </div>
     </div>
   );
 }
 
-// ── Root ──────────────────────────────────────────────────────────────────────
+function FinancialPage() {
+  const { data, loading, error, refetch } = useData(() => api.financial());
 
-export default function App() {
-  const [page, setPage] = useState<Page>("login");
+  if (loading) return <LoadingBlock />;
+  if (error) return <ErrorBlock message={error} onRetry={refetch} />;
 
-  if (page === "login") return <LoginPage onLogin={() => setPage("dashboard")} />;
+  const f = data as FinancialProfile | null;
+  if (!f) return null;
 
-  function renderPage() {
-    switch (page) {
-      case "dashboard":      return <Dashboard />;
-      case "courses":        return <CoursesPage />;
-      case "grades":         return <GradesPage />;
-      case "schedule":       return <SchedulePage />;
-      case "announcements":  return <AnnouncementsPage />;
-      default:               return <Dashboard />;
-    }
-  }
+  const balance = parseFloat(f.balance_formatted.replace(/,/g, ""));
+  const isCredit = balance < 0;
 
   return (
-    <Layout page={page} onNav={setPage} onLogout={() => setPage("login")}>
-      {renderPage()}
-    </Layout>
+    <div className="space-y-5 fade-in">
+      <SectionTitle>الوضع المالي</SectionTitle>
+
+      {/* Summary banner */}
+      <div
+        className={`rounded-2xl p-6 text-white ${isCredit ? "bg-gradient-to-l from-emerald-600 to-emerald-400" : "bg-gradient-to-l from-red-600 to-red-400"}`}
+      >
+        <p className="text-sm opacity-80">الرصيد الحالي — {f.semester_name}</p>
+        <p className="text-3xl font-bold mt-1 ltr">
+          {isCredit ? "+" : ""}{Math.abs(balance).toLocaleString()} ل.س
+        </p>
+        <p className="text-sm mt-1 opacity-70">
+          {isCredit ? "رصيد دائن — بلا مديونية" : "مديونية متبقية"}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Card className="text-center !p-6">
+          <p className="text-sm text-gray-400 mb-1">مجموع المدفوعات</p>
+          <p className="text-2xl font-bold text-emerald-600 ltr">{f.sum_credit_formatted} ل.س</p>
+        </Card>
+        <Card className="text-center !p-6">
+          <p className="text-sm text-gray-400 mb-1">مجموع المستحقات</p>
+          <p className="text-2xl font-bold text-gray-700 ltr">{f.sum_debit_formatted} ل.س</p>
+        </Card>
+      </div>
+
+      <Card>
+        <SectionTitle>تفاصيل الحساب</SectionTitle>
+        <InfoRow label="الفصل الدراسي" value={f.semester_name} />
+        <InfoRow label="مجموع المدفوعات" value={`${f.sum_credit_formatted} ل.س`} />
+        <InfoRow label="مجموع المستحقات" value={`${f.sum_debit_formatted} ل.س`} />
+        <InfoRow
+          label="الرصيد"
+          value={`${isCredit ? "دائن " : "مدين "}${Math.abs(balance).toLocaleString()} ل.س`}
+        />
+        <InfoRow label="رصيد البطاقة" value={`${f.card_balance} ل.س`} />
+      </Card>
+    </div>
   );
+}
+
+function SchedulePage() {
+  const { data: lec, loading: ll, error: el, refetch: rl } = useData(() => api.lectures());
+  const { data: exm, loading: le, error: ee, refetch: re } = useData(() => api.exams());
+
+  if (ll || le) return <LoadingBlock />;
+
+  const schedule = lec as ScheduleData | null;
+  const exams = exm as ExamData | null;
+  const examList = (exams?.exams ?? []) as Array<{
+    course_name?: string;
+    exam_date?: string;
+    exam_time?: string;
+    room_name?: string;
+    seat_no?: string;
+    day_name?: string;
+  }>;
+
+  return (
+    <div className="space-y-5 fade-in">
+      {/* Lectures */}
+      <Card>
+        <SectionTitle>جدول المحاضرات</SectionTitle>
+        {el ? (
+          <ErrorBlock message={el} onRetry={rl} />
+        ) : (schedule?.courses ?? []).length === 0 ? (
+          <div className="flex flex-col items-center py-10 text-gray-300 gap-2">
+            <Calendar size={32} />
+            <p className="text-sm text-gray-400">
+              الجدول غير متاح حالياً أو الفصل منتهٍ
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">يتم عرض البيانات كما وردت من الجامعة</p>
+        )}
+      </Card>
+
+      {/* Exams */}
+      <Card>
+        <SectionTitle>جدول الامتحانات</SectionTitle>
+        {ee ? (
+          <ErrorBlock message={ee} onRetry={re} />
+        ) : examList.length === 0 ? (
+          <div className="flex flex-col items-center py-10 text-gray-300 gap-2">
+            <BookOpen size={32} />
+            <p className="text-sm text-gray-400">لا توجد امتحانات مجدولة حالياً</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 text-gray-500 text-xs">
+                  <th className="text-right px-4 py-2.5 font-medium">المادة</th>
+                  <th className="px-3 py-2.5 font-medium">التاريخ</th>
+                  <th className="px-3 py-2.5 font-medium">اليوم</th>
+                  <th className="px-3 py-2.5 font-medium">الوقت</th>
+                  <th className="px-3 py-2.5 font-medium">القاعة</th>
+                  <th className="px-3 py-2.5 font-medium">المقعد</th>
+                </tr>
+              </thead>
+              <tbody>
+                {examList.map((ex, i) => (
+                  <tr key={i} className="border-t border-gray-50 hover:bg-gray-50/50">
+                    <td className="px-4 py-3 font-medium text-gray-800">{ex.course_name}</td>
+                    <td className="px-3 py-3 text-center text-gray-600 text-xs">{ex.exam_date}</td>
+                    <td className="px-3 py-3 text-center text-gray-600 text-xs">{ex.day_name}</td>
+                    <td className="px-3 py-3 text-center text-gray-600 text-xs">{ex.exam_time}</td>
+                    <td className="px-3 py-3 text-center text-gray-600 text-xs">{ex.room_name}</td>
+                    <td className="px-3 py-3 text-center text-gray-600 text-xs">{ex.seat_no ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function CoursesPage() {
+  const { data, loading, error, refetch } = useData(() => api.remaining());
+
+  if (loading) return <LoadingBlock />;
+  if (error) return <ErrorBlock message={error} onRetry={refetch} />;
+
+  const rem = data as RemainingCourses | null;
+  const courses = rem?.courses ?? [];
+  const reqTypes = (rem?.requirement_types ?? []).filter(
+    (r) => r.requirement_type_id !== "all"
+  );
+
+  const byType = reqTypes.map((rt) => ({
+    ...rt,
+    courses: courses.filter((c) => c.requirement_type_id === rt.requirement_type_id),
+  }));
+
+  return (
+    <div className="space-y-5 fade-in">
+      <SectionTitle>المواد المتبقية حتى التخرج</SectionTitle>
+
+      {/* Summary */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {reqTypes.map((rt) => (
+          <Card key={rt.requirement_type_id} className="!p-4 text-center">
+            <p className="text-xs text-gray-400 mb-1 leading-snug">{rt.requirement_type}</p>
+            <p className="text-lg font-bold text-[var(--aspu-green)]">
+              {rt.credits_count ?? "—"} <span className="text-xs font-normal text-gray-400">ساعة</span>
+            </p>
+          </Card>
+        ))}
+      </div>
+
+      {/* Courses by type */}
+      {byType.map((group) =>
+        group.courses.length === 0 ? null : (
+          <Card key={group.requirement_type_id}>
+            <SectionTitle>{group.requirement_type}</SectionTitle>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {group.courses.map((c) => (
+                <div
+                  key={c.course_id}
+                  className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-gray-800">{c.course_name_full}</p>
+                    <p className="text-xs text-gray-400">{c.course_code}</p>
+                  </div>
+                  <span className="text-xs bg-[var(--aspu-green-light)] text-[var(--aspu-green)] px-2.5 py-1 rounded-full font-medium shrink-0 mr-2">
+                    {c.course_credits} ساعة
+                  </span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )
+      )}
+
+      {courses.length === 0 && (
+        <Card>
+          <p className="text-center text-gray-400 py-10">لا توجد مواد متبقية</p>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── Layout ───────────────────────────────────────────────────────────────────
+
+function AppLayout({
+  username, onLogout,
+}: {
+  username: string;
+  onLogout: () => void;
+}) {
+  const [page, setPage] = useState<Page>("overview");
+  const [collapsed, setCollapsed] = useState(true);
+
+  const pageTitle = NAV_ITEMS.find((n) => n.id === page)?.label ?? "";
+
+  return (
+    <div className="min-h-screen">
+      <Sidebar
+        page={page}
+        setPage={setPage}
+        onLogout={onLogout}
+        collapsed={collapsed}
+        setCollapsed={setCollapsed}
+        username={username}
+      />
+
+      {/* Main content */}
+      <div className="md:mr-[260px] transition-all duration-300">
+        {/* Topbar */}
+        <header className="sticky top-0 z-10 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-3">
+            <button
+              className="p-2 rounded-lg hover:bg-gray-100 transition md:hidden"
+              onClick={() => setCollapsed(false)}
+            >
+              <Menu size={20} className="text-gray-600" />
+            </button>
+            <h1 className="font-bold text-gray-800 text-base">{pageTitle}</h1>
+          </div>
+          <div className="text-xs text-gray-400 hidden sm:block">ASPU Student Portal</div>
+        </header>
+
+        {/* Page content */}
+        <main className="p-4 sm:p-6 max-w-5xl mx-auto pb-16">
+          {page === "overview"  && <OverviewPage username={username} />}
+          {page === "grades"    && <GradesPage />}
+          {page === "profile"   && <ProfilePage />}
+          {page === "financial" && <FinancialPage />}
+          {page === "schedule"  && <SchedulePage />}
+          {page === "courses"   && <CoursesPage />}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+// ─── Root App ─────────────────────────────────────────────────────────────────
+
+export default function App() {
+  const [loggedIn, setLoggedIn] = useState<boolean>(!!getToken());
+  const [username, setUsername] = useState<string>("");
+
+  // Verify existing token on mount
+  useEffect(() => {
+    if (!getToken()) return;
+    api
+      .me()
+      .then((data) => {
+        setUsername(data.username);
+        setLoggedIn(true);
+      })
+      .catch(() => {
+        clearToken();
+        setLoggedIn(false);
+      });
+  }, []);
+
+  // Handle session expiry from any page
+  useEffect(() => {
+    const handler = () => {
+      clearToken();
+      setLoggedIn(false);
+      setUsername("");
+    };
+    window.addEventListener("session-expired", handler);
+    return () => window.removeEventListener("session-expired", handler);
+  }, []);
+
+  const handleLogin = () => {
+    api.me().then((d) => {
+      setUsername(d.username);
+      setLoggedIn(true);
+    });
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    setLoggedIn(false);
+    setUsername("");
+  };
+
+  if (!loggedIn) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
+  return <AppLayout username={username} onLogout={handleLogout} />;
 }

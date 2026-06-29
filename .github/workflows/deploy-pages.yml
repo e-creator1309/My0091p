@@ -31,7 +31,8 @@ jobs:
           BASE_PATH: /My0091p/
           PORT: "3000"
           NODE_ENV: production
-          VITE_API_BASE_URL: ${{ secrets.VITE_API_BASE_URL }}
+          # URL of the deployed Replit api-server (set this in GitHub repo secrets)
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
         run: pnpm --filter @workspace/student-portal run build
 
       - name: Add .nojekyll
