@@ -881,10 +881,17 @@ export default function App() {
   }, []);
 
   const handleLogin = () => {
-    api.me().then((d) => {
-      setUsername(d.username);
-      setLoggedIn(true);
-    });
+    api
+      .me()
+      .then((d) => {
+        setUsername(d.username);
+        setLoggedIn(true);
+      })
+      .catch(() => {
+        // Token was issued but /me failed — clear and stay on login
+        clearToken();
+        setLoggedIn(false);
+      });
   };
 
   const handleLogout = async () => {

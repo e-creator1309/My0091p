@@ -1,3 +1,7 @@
+// NOTE: my.aspu.edu.sy does not support TLS — the university's server only
+// serves plain HTTP. All communication stays server-to-server (Replit → ASPU),
+// so student credentials are never transmitted over a public plaintext link.
+// Student ↔ Replit traffic is always HTTPS (Replit terminates TLS).
 const ASPU_BASE = "http://my.aspu.edu.sy";
 
 const COMMON_HEADERS = {
