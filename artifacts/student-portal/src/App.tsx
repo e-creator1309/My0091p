@@ -3,6 +3,7 @@ import {
   LayoutDashboard, BookOpen, GraduationCap, Calendar,
   Wallet, ListChecks, LogOut, Menu, X, ChevronDown,
   User, AlertCircle, Loader2, RefreshCw, Bell,
+  ClipboardList, CreditCard, Settings, TrendingUp, ChevronRight,
 } from "lucide-react";
 import {
   api, login, logout, getToken, setToken, clearToken,
@@ -226,15 +227,20 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-type Page = "overview" | "grades" | "profile" | "financial" | "schedule" | "courses";
+type Page = "overview" | "grades" | "currentgrades" | "academicstatus" | "profile" | "financial" | "statement" | "schedule" | "courses" | "registration" | "settings";
 
 const NAV_ITEMS: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
-  { id: "overview",  label: "الرئيسية",        icon: LayoutDashboard },
-  { id: "grades",    label: "النتائج والعلامات", icon: BookOpen },
-  { id: "schedule",  label: "الجدول الدراسي",   icon: Calendar },
-  { id: "profile",   label: "ملفي الشخصي",     icon: User },
-  { id: "financial", label: "الوضع المالي",    icon: Wallet },
-  { id: "courses",   label: "المواد المتبقية",  icon: ListChecks },
+  { id: "overview",       label: "الرئيسية",           icon: LayoutDashboard },
+  { id: "grades",         label: "النتائج والعلامات",   icon: BookOpen },
+  { id: "currentgrades",  label: "علامات الفصل الحالي", icon: TrendingUp },
+  { id: "registration",   label: "تسجيل المقررات",     icon: ClipboardList },
+  { id: "schedule",       label: "الجدول الدراسي",     icon: Calendar },
+  { id: "profile",        label: "ملفي الشخصي",       icon: User },
+  { id: "financial",      label: "الوضع المالي",      icon: Wallet },
+  { id: "statement",      label: "كشف الحساب",        icon: CreditCard },
+  { id: "courses",        label: "المواد المتبقية",    icon: ListChecks },
+  { id: "academicstatus", label: "السجل الأكاديمي",    icon: GraduationCap },
+  { id: "settings",       label: "الإعدادات",          icon: Settings },
 ];
 
 function Sidebar({
@@ -796,6 +802,329 @@ function CoursesPage() {
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
+
+// ─── Current Semester Grades ────────────────────────────────────────────────
+
+function CurrentGradesPage() {
+  const { data, loading, error, refetch } = useData(() => api.currentGrades());
+
+  if (loading) return <LoadingBlock />;
+  if (error) return <ErrorBlock message={error} onRetry={refetch} />;
+
+  const d = data as { courses: unknown[]; semester_name: string; max_tests_count: number } | null;
+  const courses = (d?.courses ?? []) as Array<{
+    course_name: string; course_code: string; course_credits: string;
+    final_mark: string | null; grade: string | null;
+    tests: {
+      archive_test_1: string | null; archive_test_2: string | null;
+      archive_fixed_mark: string | null; archive_final_mark: string | null;
+      final_mark: string | null; grade: string | null;
+    } | null;
+  }>;
+
+  return (
+    <div className="space-y-5 fade-in">
+      <div className="flex items-center justify-between">
+        <SectionTitle>علامات الفصل الحالي</SectionTitle>
+        {d?.semester_name && (
+          <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">{d.semester_name}</span>
+        )}
+      </div>
+      <Card className="!p-0 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="text-right px-4 py-3 font-semibold text-gray-600">المقرر</th>
+                <th className="text-center px-3 py-3 font-semibold text-gray-600 whitespace-nowrap">أعمال فصل</th>
+                <th className="text-center px-3 py-3 font-semibold text-gray-600">نهائي</th>
+                <th className="text-center px-3 py-3 font-semibold text-gray-600">التقدير</th>
+              </tr>
+            </thead>
+            <tbody>
+              {courses.map((c, i) => (
+                <tr key={i} className="border-t border-gray-50 hover:bg-gray-50/50">
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-gray-800">{c.course_name}</p>
+                    <p className="text-xs text-gray-400">{c.course_code} · {c.course_credits} ساعة</p>
+                  </td>
+                  <td className="px-3 py-3 text-center">
+                    <span className="font-medium text-gray-700">{c.tests?.archive_fixed_mark ?? "—"}</span>
+                  </td>
+                  <td className="px-3 py-3 text-center">
+                    <span className="font-medium text-gray-700">{c.tests?.archive_final_mark ?? "—"}</span>
+                  </td>
+                  <td className="px-3 py-3 text-center">
+                    {c.grade ? (
+                      <span className={`text-xs font-bold px-2 py-1 rounded-lg ${gradeClass(c.grade)}`}>{c.grade}</span>
+                    ) : <span className="text-gray-300">—</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Registration Page ────────────────────────────────────────────────────────
+
+function RegistrationPage() {
+  const { data: opened, loading, error, refetch } = useData(() => api.registrationOpened());
+  const { data: rules } = useData(() => api.registrationRules());
+
+  if (loading) return <LoadingBlock />;
+  if (error) return <ErrorBlock message={error} onRetry={refetch} />;
+
+  const courses = ((opened as { courses?: unknown[] } | null)?.courses ?? []) as Array<{
+    course_name: string; course_code: string; course_credits: string;
+    requirement_type: string; allow_register: string; allow_exam: string;
+    status_reason: string; is_requestable: string; year_order: string; color?: string;
+  }>;
+  const rulesList = (rules as Array<{ rule: string; value: string; description: string }> | null) ?? [];
+
+  const canRegister = courses.filter(c => c.is_requestable === 'Y');
+  const cannotRegister = courses.filter(c => c.is_requestable !== 'Y');
+
+  return (
+    <div className="space-y-5 fade-in">
+      <SectionTitle>تسجيل المقررات</SectionTitle>
+
+      {/* Rules summary */}
+      {rulesList.length > 0 && (
+        <Card>
+          <SectionTitle>قواعد التسجيل</SectionTitle>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {rulesList.map((r, i) => (
+              <div key={i} className="bg-gray-50 rounded-xl px-4 py-3">
+                <p className="text-xs text-gray-500 mb-0.5">{r.rule}</p>
+                <p className="font-semibold text-sm text-gray-800">{r.value}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Available to register */}
+      <Card>
+        <SectionTitle>مقررات يمكن تسجيلها ({canRegister.length})</SectionTitle>
+        {canRegister.length === 0 ? (
+          <p className="text-center text-gray-400 py-8 text-sm">لا توجد مقررات متاحة للتسجيل حالياً</p>
+        ) : (
+          <div className="space-y-2">
+            {canRegister.map((c, i) => (
+              <div key={i} className="flex items-center justify-between bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
+                <div>
+                  <p className="font-medium text-sm text-gray-800">{c.course_name}</p>
+                  <p className="text-xs text-gray-500">{c.course_code} · {c.requirement_type}</p>
+                </div>
+                <div className="text-left shrink-0 mr-3">
+                  <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full font-medium block text-center">{c.course_credits} ساعة</span>
+                  <span className="text-xs text-emerald-600 mt-1 block">{c.allow_exam === 'Y' ? 'امتحان ✓' : ''}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* Cannot register */}
+      {cannotRegister.length > 0 && (
+        <Card>
+          <SectionTitle>مقررات غير متاحة ({cannotRegister.length})</SectionTitle>
+          <div className="space-y-2">
+            {cannotRegister.map((c, i) => (
+              <div key={i} className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 opacity-70">
+                <div>
+                  <p className="font-medium text-sm text-gray-800">{c.course_name}</p>
+                  <p className="text-xs text-red-400">{c.status_reason}</p>
+                </div>
+                <span className="text-xs bg-gray-200 text-gray-500 px-2 py-1 rounded-full shrink-0 mr-3">{c.course_credits} ساعة</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── Academic Status Page ─────────────────────────────────────────────────────
+
+function AcademicStatusPage() {
+  const { data, loading, error, refetch } = useData(() => api.gradesStatus());
+
+  if (loading) return <LoadingBlock />;
+  if (error) return <ErrorBlock message={error} onRetry={refetch} />;
+
+  const records = (data as Array<{ semesters: unknown[]; degree_name: string }> | null) ?? [];
+  const allSemesters = records.flatMap(r =>
+    (r.semesters as Array<{
+      semester_name: string; year_name: string; start_level_name: string;
+      gpa_percent: string; gpa_points: string; end_agpa_percent: string;
+      semester_pass_credits: string; end_total_in_credits: string;
+      warning_status: string; temp_status: string;
+    }>)
+  );
+
+  return (
+    <div className="space-y-5 fade-in">
+      <SectionTitle>السجل الأكاديمي</SectionTitle>
+
+      {/* Summary chart-like overview */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "عدد الفصول", value: allSemesters.length.toString() },
+          { label: "الساعات المجتازة", value: allSemesters[allSemesters.length - 1]?.end_total_in_credits ?? "—" },
+          { label: "المعدل التراكمي", value: allSemesters[allSemesters.length - 1]?.end_agpa_percent ? allSemesters[allSemesters.length - 1].end_agpa_percent + "%" : "—" },
+          { label: "الحالة الأكاديمية", value: allSemesters[allSemesters.length - 1]?.temp_status ?? "—" },
+        ].map(item => (
+          <Card key={item.label} className="!p-4 text-center">
+            <p className="text-xs text-gray-400 mb-1">{item.label}</p>
+            <p className="text-sm font-bold text-gray-800">{item.value}</p>
+          </Card>
+        ))}
+      </div>
+
+      {/* Semesters table */}
+      <Card className="!p-0 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="text-right px-4 py-3 font-semibold text-gray-600">الفصل</th>
+                <th className="text-center px-3 py-3 font-semibold text-gray-600">معدل الفصل</th>
+                <th className="text-center px-3 py-3 font-semibold text-gray-600">المعدل التراكمي</th>
+                <th className="text-center px-3 py-3 font-semibold text-gray-600">الساعات</th>
+                <th className="text-center px-3 py-3 font-semibold text-gray-600">الحالة</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allSemesters.map((s, i) => (
+                <tr key={i} className="border-t border-gray-50 hover:bg-gray-50/50">
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-gray-800 text-xs leading-snug">{s.semester_name}</p>
+                    <p className="text-xs text-gray-400">{s.start_level_name}</p>
+                  </td>
+                  <td className="px-3 py-3 text-center">
+                    <span className={`font-bold text-sm ${gradePercent(s.gpa_percent)}`}>{s.gpa_percent}%</span>
+                  </td>
+                  <td className="px-3 py-3 text-center text-gray-600 text-xs">{s.end_agpa_percent}%</td>
+                  <td className="px-3 py-3 text-center text-gray-600 text-xs">{s.semester_pass_credits}</td>
+                  <td className="px-3 py-3 text-center">
+                    <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">{s.temp_status}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Statement Page ───────────────────────────────────────────────────────────
+
+function StatementPage() {
+  const { data, loading, error, refetch } = useData(() => api.statement());
+
+  if (loading) return <LoadingBlock />;
+  if (error) return <ErrorBlock message={error} onRetry={refetch} />;
+
+  const rows = (data as Array<{
+    transaction_date: string; transaction_type: string;
+    transaction_statement: string; semester_name: string;
+    debit: string; credit: string; balance: string; currency_name: string;
+  }> | null) ?? [];
+
+  const totalDebit = rows[rows.length - 1]?.balance ?? "—";
+
+  return (
+    <div className="space-y-5 fade-in">
+      <SectionTitle>كشف الحساب المالي</SectionTitle>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Card className="!p-4 text-center">
+          <p className="text-xs text-gray-400 mb-1">عدد الحركات</p>
+          <p className="text-2xl font-bold text-gray-800">{rows.length}</p>
+        </Card>
+        <Card className="!p-4 text-center">
+          <p className="text-xs text-gray-400 mb-1">الرصيد الحالي</p>
+          <p className="text-lg font-bold text-red-500">{totalDebit}</p>
+        </Card>
+      </div>
+
+      <Card className="!p-0 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="text-right px-4 py-3 font-semibold text-gray-600">البيان</th>
+                <th className="text-center px-3 py-3 font-semibold text-gray-600">التاريخ</th>
+                <th className="text-center px-3 py-3 font-semibold text-gray-600">مدين</th>
+                <th className="text-center px-3 py-3 font-semibold text-gray-600">دائن</th>
+                <th className="text-center px-3 py-3 font-semibold text-gray-600">الرصيد</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i} className="border-t border-gray-50 hover:bg-gray-50/50">
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-xs text-gray-800">{r.transaction_statement}</p>
+                    <p className="text-xs text-gray-400">{r.semester_name}</p>
+                  </td>
+                  <td className="px-3 py-3 text-center text-xs text-gray-500">{r.transaction_date}</td>
+                  <td className="px-3 py-3 text-center text-xs text-red-500 font-medium">{r.debit !== "0" ? r.debit : "—"}</td>
+                  <td className="px-3 py-3 text-center text-xs text-emerald-600 font-medium">{r.credit !== "0" ? r.credit : "—"}</td>
+                  <td className="px-3 py-3 text-center text-xs text-gray-700 font-semibold">{r.balance}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Settings Page ────────────────────────────────────────────────────────────
+
+function SettingsPage() {
+  const { data, loading, error, refetch } = useData(() => api.settings());
+
+  if (loading) return <LoadingBlock />;
+  if (error) return <ErrorBlock message={error} onRetry={refetch} />;
+
+  const s = data as {
+    email: string | null; mobile: string | null; verify_email: boolean;
+    verify_mobile: boolean; military_zone: string | null; military_num: string | null;
+    is_male: boolean;
+  } | null;
+
+  return (
+    <div className="space-y-5 fade-in">
+      <SectionTitle>الإعدادات الشخصية</SectionTitle>
+      <Card>
+        <SectionTitle>معلومات التواصل</SectionTitle>
+        <InfoRow label="البريد الإلكتروني" value={s?.email ?? "—"} />
+        <InfoRow label="حالة البريد" value={s?.verify_email ? "✓ مُفعَّل" : "غير مُفعَّل"} />
+        <InfoRow label="الجوال" value={s?.mobile ?? "—"} />
+        <InfoRow label="حالة الجوال" value={s?.verify_mobile ? "✓ مُفعَّل" : "غير مُفعَّل"} />
+      </Card>
+      {(s?.military_zone || s?.military_num) && (
+        <Card>
+          <SectionTitle>المعلومات العسكرية</SectionTitle>
+          <InfoRow label="المنطقة العسكرية" value={s?.military_zone} />
+          <InfoRow label="الرقم العسكري" value={s?.military_num} />
+        </Card>
+      )}
+    </div>
+  );
+}
+
 function AppLayout({
   username, onLogout,
 }: {
@@ -836,12 +1165,17 @@ function AppLayout({
 
         {/* Page content */}
         <main className="p-4 sm:p-6 max-w-5xl mx-auto pb-16">
-          {page === "overview"  && <OverviewPage username={username} />}
-          {page === "grades"    && <GradesPage />}
-          {page === "profile"   && <ProfilePage />}
-          {page === "financial" && <FinancialPage />}
-          {page === "schedule"  && <SchedulePage />}
-          {page === "courses"   && <CoursesPage />}
+          {page === "overview"       && <OverviewPage username={username} />}
+          {page === "grades"           && <GradesPage />}
+          {page === "currentgrades"    && <CurrentGradesPage />}
+          {page === "registration"     && <RegistrationPage />}
+          {page === "profile"          && <ProfilePage />}
+          {page === "financial"        && <FinancialPage />}
+          {page === "statement"        && <StatementPage />}
+          {page === "schedule"         && <SchedulePage />}
+          {page === "courses"          && <CoursesPage />}
+          {page === "academicstatus"   && <AcademicStatusPage />}
+          {page === "settings"         && <SettingsPage />}
         </main>
       </div>
     </div>
