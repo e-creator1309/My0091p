@@ -29,6 +29,13 @@ export async function logout(): Promise<void> {
   clearToken();
 }
 
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await apiFetch(path, { method: 'POST', body: JSON.stringify(body) });
+  if (res.status === 401) { clearToken(); throw Object.assign(new Error('SESSION_EXPIRED'), { statusCode: 401 }); }
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as {message?:string}).message ?? `خطأ ${res.status}`); }
+  return res.json() as Promise<T>;
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await apiFetch(path);
   if (res.status === 401) { clearToken(); throw Object.assign(new Error("SESSION_EXPIRED"), { statusCode: 401 }); }
@@ -55,6 +62,7 @@ export const api = {
   registrationAvail:   () => get<RegistrationData>("/student/registration/available"),
   registrationRules:   () => get<RegistrationRule[]>("/student/registration/rules"),
   settings:            () => get<StudentSettings>("/student/settings"),
+  submitRegistration:  (body: { courseIds: string[]; onlyExamIds: string[] }) => post<Record<string,unknown>>("/student/registration/submit", body),
 };
 
 // ─── Types ─────────────────────────────────────────────────────────────────
