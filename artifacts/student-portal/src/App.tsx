@@ -874,10 +874,10 @@ function CurrentGradesPage() {
 function RegistrationPage() {
   const { data: opened, loading, error, refetch } = useData(() => api.registrationOpened());
   const { data: rules } = useData(() => api.registrationRules());
-  const [selected, setSelected] = React.useState<Record<string, "study" | "exam">>({});
-  const [submitting, setSubmitting] = React.useState(false);
-  const [result, setResult] = React.useState<{ success: boolean; message: string } | null>(null);
-  const [confirm, setConfirm] = React.useState(false);
+  const [selected, setSelected] = useState<Record<string, "study" | "exam">>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [confirm, setConfirm] = useState(false);
 
   if (loading) return <LoadingBlock />;
   if (error) return <ErrorBlock message={error} onRetry={refetch} />;
