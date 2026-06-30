@@ -25,7 +25,17 @@ app.use(
     },
   }),
 );
-app.use(cors());
+app.use(
+  cors({
+    origin: [
+      "https://e-creator1309.github.io",
+      /^http:\/\/localhost(:\d+)?$/,
+      /^https?:\/\/.*\.replit\.dev$/,
+      /^https?:\/\/.*\.repl\.co$/,
+    ],
+    credentials: true,
+  }),
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

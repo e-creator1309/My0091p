@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+:root {
+  --aspu-green: #0a7c3e;
+  --aspu-green-dark: #075c2e;
+  --aspu-green-light: #e8f5ee;
+  --aspu-sidebar-width: 260px;
+}
+
+html,
+body {
+  direction: rtl;
+  font-family: "Segoe UI", "Tahoma", "Arial", sans-serif;
+  background-color: #f4f6f9;
+  color: #1a1a2e;
+  margin: 0;
+  padding: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+/* Grade badge colors */
+.grade-a { background: #d1fae5; color: #065f46; }
+.grade-b { background: #dbeafe; color: #1e40af; }
+.grade-c { background: #fef9c3; color: #854d0e; }
+.grade-d { background: #ffedd5; color: #9a3412; }
+.grade-f { background: #fee2e2; color: #991b1b; }
+
+/* Fade in animation */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fadeInUp 0.3s ease forwards; }
+
+/* Pulse for loading */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #e0e0e0 25%, #f0f0f0 50%, #e0e0e0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 6px;
+}
