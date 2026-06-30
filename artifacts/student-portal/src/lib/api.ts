@@ -51,18 +51,21 @@ export const api = {
   academic:            () => get<AcademicProfile>("/student/profile/academic"),
   financial:           () => get<FinancialProfile>("/student/profile/financial"),
   statement:           () => get<StatementRow[]>("/student/profile/statement"),
-  epayments:           () => get<Record<string, unknown>>("/student/profile/epayments"),
+  epayments:           () => get<EPaymentsData>("/student/profile/epayments"),
+  banks:               () => get<unknown[]>("/student/profile/banks"),
   grades:              () => get<GradesData>("/student/grades"),
   currentGrades:       () => get<CurrentGradesData>("/student/grades/current"),
   gradesStatus:        () => get<GradesStatusData[]>("/student/grades/status"),
   lectures:            () => get<ScheduleData>("/student/schedule/lectures"),
   exams:               () => get<ExamData>("/student/schedule/exams"),
+  calendarEvents:      () => get<CalendarEventsData>("/student/schedule/events"),
   remaining:           () => get<RemainingCourses>("/student/registration/remaining"),
   registrationOpened:  () => get<RegistrationData>("/student/registration/opened"),
   registrationAvail:   () => get<RegistrationData>("/student/registration/available"),
   registrationRules:   () => get<RegistrationRule[]>("/student/registration/rules"),
-  settings:            () => get<StudentSettings>("/student/settings"),
   submitRegistration:  (body: { courseIds: string[]; onlyExamIds: string[] }) => post<Record<string,unknown>>("/student/registration/submit", body),
+  windowOne:           () => get<WindowOneData>("/student/window-one"),
+  settings:            () => get<StudentSettings>("/student/settings"),
 };
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -77,7 +80,11 @@ export interface AcademicProfile {
   student_num: string; faculty: string; degree: string; level: string; status: string;
   agpa: string; credits: string; applying_semester: string; register_date: string;
   warning_status: string; diploma_type: string; diploma_mark: string;
-  diploma_gpa: string; job_location: string;
+  diploma_gpa: string; job_location: string; current_status?: string;
+  level_short?: string; grade_version?: string; transferred_credits?: string;
+  aca_warning_status_id?: string | null; transcript_statement?: string | null;
+  admission_date?: string; diploma_num?: string; diploma_location?: string;
+  diploma_period?: string; diploma_date?: string | null; advisor_name?: string | null;
 }
 
 export interface FinancialProfile {
@@ -87,15 +94,30 @@ export interface FinancialProfile {
 
 export interface StatementRow {
   transaction_date: string; transaction_type: string; transaction_statement: string;
-  semester_name: string; debit: string; credit: string; balance: string; currency_name: string;
+  transaction_category?: string; semester_name: string; debit: string; credit: string;
+  balance: string; local_balance?: string; currency_name: string; currency_rate?: string;
+  transaction_notes?: string | null;
+}
+
+export interface EPaymentsData {
+  currency: { CURRENCY_ID: string; CURRENCY_NAME: string; CURRENCY_CODE: string | null };
+  e_payments: Array<{
+    id: string; amount: string; status: string; created_at: string;
+    payment_method?: string; reference_num?: string;
+  }>;
 }
 
 export interface Course {
   course_id: string; course_name: string; course_code: string; course_credits: string;
   final_mark: string | null; grade: string | null; finish_status: string | null;
+  points?: string | null; is_visible?: string; register_status?: string;
+  hide_reason?: string | null; final_added_marks?: string | null;
   tests?: {
     archive_test_1: string | null; archive_test_2: string | null;
+    archive_test_3?: string | null; archive_test_4?: string | null;
     archive_fixed_mark: string | null; archive_final_mark: string | null;
+    final_mark?: string | null; grade?: string | null;
+    tests_count?: number;
   };
 }
 
@@ -104,7 +126,7 @@ export interface Semester {
   gpa_percent: string | null; gpa_points: string | null;
   end_agpa_percent: string | null; end_agpa_points: string | null;
   grade_name: string | null; grade_name_sem: string | null;
-  end_total_in_credits: string | null;
+  end_total_in_credits: string | null; transferred?: Course[];
 }
 
 export interface GradesData { semesters: Semester[]; }
@@ -127,6 +149,12 @@ export interface GradesStatusData {
 
 export interface ScheduleData { courses: unknown[]; instructors: unknown[]; }
 export interface ExamData { exams: unknown[]; }
+export interface CalendarEventsData {
+  events: Array<{
+    date: string; type: string; course_name?: string; note?: string;
+  }>;
+  labels: Array<{ text: string | null; value: string; color: string }>;
+}
 
 export interface RemainingCourse {
   course_id: string; course_name_full: string; course_code: string;
@@ -149,7 +177,25 @@ export interface RegistrationData { courses: RegistrationCourse[]; options?: unk
 
 export interface RegistrationRule { rule: string; value: string; description: string; }
 
+export interface WindowOneRequest {
+  id: string; request_category: string; request_category_id: string;
+  request_type: string; request_type_id?: string;
+  status: string; status_id?: string; status_color?: string;
+  created_at: string; semester_name: string;
+  notes?: string | null; response?: string | null;
+}
+
+export interface WindowOneData {
+  semester_name: string;
+  request_delete_allowed_hours: string;
+  request_categories: Record<string, string>;
+  requests: WindowOneRequest[];
+  request_types?: Array<{ id: string; name: string; category_id: string }>;
+}
+
 export interface StudentSettings {
   is_male: boolean; military_zone: string | null; military_num: string | null;
   email: string | null; mobile: string | null; verify_email: boolean; verify_mobile: boolean;
+  picture?: string; allow_change_profile_photo?: boolean;
+  announcement_methods?: Array<{ announcement_method_id: string; method_code: string; method_name: string }>;
 }

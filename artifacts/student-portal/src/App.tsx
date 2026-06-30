@@ -4,12 +4,13 @@ import {
   Wallet, ListChecks, LogOut, Menu, X, ChevronDown,
   User, AlertCircle, Loader2, RefreshCw, Bell,
   ClipboardList, CreditCard, Settings, TrendingUp, ChevronRight,
+  Inbox, CheckCircle, Clock, XCircle,
 } from "lucide-react";
 import {
   api, login, logout, getToken, setToken, clearToken,
   type PersonalProfile, type AcademicProfile, type FinancialProfile,
   type GradesData, type Semester, type RemainingCourses,
-  type ScheduleData, type ExamData,
+  type ScheduleData, type ExamData, type WindowOneData,
 } from "./lib/api";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -227,7 +228,7 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 
-type Page = "overview" | "grades" | "currentgrades" | "academicstatus" | "profile" | "financial" | "statement" | "schedule" | "courses" | "registration" | "settings";
+type Page = "overview" | "grades" | "currentgrades" | "academicstatus" | "profile" | "financial" | "statement" | "schedule" | "courses" | "registration" | "windowone" | "settings";
 
 const NAV_ITEMS: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "overview",       label: "الرئيسية",           icon: LayoutDashboard },
@@ -240,6 +241,7 @@ const NAV_ITEMS: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "statement",      label: "كشف الحساب",        icon: CreditCard },
   { id: "courses",        label: "المواد المتبقية",    icon: ListChecks },
   { id: "academicstatus", label: "السجل الأكاديمي",    icon: GraduationCap },
+  { id: "windowone",      label: "طلبات الطالب",       icon: Inbox },
   { id: "settings",       label: "الإعدادات",          icon: Settings },
 ];
 
@@ -1168,6 +1170,100 @@ function StatementPage() {
   );
 }
 
+// ─── Window One (طلبات الطالب) ────────────────────────────────────────────────
+
+function WindowOnePage() {
+  const { data, loading, error, refetch } = useData(() => api.windowOne());
+
+  if (loading) return <LoadingBlock />;
+  if (error) return <ErrorBlock message={error} onRetry={refetch} />;
+
+  const d = data as WindowOneData | null;
+  const requests = d?.requests ?? [];
+
+  function statusIcon(status: string) {
+    const s = status?.toLowerCase() ?? "";
+    if (s.includes("قبل") || s.includes("موافق") || s.includes("مكتمل"))
+      return <CheckCircle size={15} className="text-emerald-500" />;
+    if (s.includes("رفض") || s.includes("ملغ"))
+      return <XCircle size={15} className="text-red-400" />;
+    return <Clock size={15} className="text-amber-400" />;
+  }
+
+  function statusBadge(status: string, color?: string) {
+    const base = "text-xs font-semibold px-2.5 py-1 rounded-full";
+    if (color === "success" || status?.toLowerCase().includes("موافق") || status?.toLowerCase().includes("مكتمل"))
+      return `${base} bg-emerald-50 text-emerald-700`;
+    if (color === "danger" || status?.toLowerCase().includes("رفض"))
+      return `${base} bg-red-50 text-red-600`;
+    return `${base} bg-amber-50 text-amber-700`;
+  }
+
+  return (
+    <div className="space-y-5 fade-in">
+      <div className="flex items-center justify-between">
+        <SectionTitle>طلبات الطالب</SectionTitle>
+        {d?.semester_name && (
+          <span className="text-xs text-gray-400 bg-gray-100 px-3 py-1 rounded-full">{d.semester_name}</span>
+        )}
+      </div>
+
+      {requests.length === 0 ? (
+        <Card>
+          <div className="flex flex-col items-center justify-center py-12 gap-3 text-gray-400">
+            <Inbox size={40} className="opacity-40" />
+            <p className="text-sm">لا توجد طلبات مسجّلة لهذا الفصل</p>
+          </div>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {requests.map((r, i) => (
+            <Card key={r.id ?? i} className="!p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="mt-0.5 shrink-0">{statusIcon(r.status)}</div>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm text-gray-800 leading-snug">{r.request_type ?? r.request_category}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{r.request_category}</p>
+                    {r.semester_name && (
+                      <p className="text-xs text-gray-400 mt-0.5">{r.semester_name}</p>
+                    )}
+                    {r.notes && (
+                      <p className="text-xs text-gray-500 mt-1.5 bg-gray-50 rounded-lg px-2 py-1">{r.notes}</p>
+                    )}
+                    {r.response && (
+                      <p className="text-xs text-emerald-700 mt-1.5 bg-emerald-50 rounded-lg px-2 py-1">{r.response}</p>
+                    )}
+                  </div>
+                </div>
+                <div className="shrink-0 flex flex-col items-end gap-2">
+                  <span className={statusBadge(r.status, r.status_color)}>{r.status}</span>
+                  {r.created_at && (
+                    <span className="text-xs text-gray-300">{r.created_at}</span>
+                  )}
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {d?.request_categories && Object.keys(d.request_categories).length > 0 && (
+        <Card>
+          <SectionTitle>فئات الطلبات المتاحة</SectionTitle>
+          <div className="flex flex-wrap gap-2">
+            {Object.values(d.request_categories).map((cat, i) => (
+              <span key={i} className="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded-full">
+                {cat}
+              </span>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ─── Settings Page ────────────────────────────────────────────────────────────
 
 function SettingsPage() {
@@ -1253,6 +1349,7 @@ function AppLayout({
           {page === "schedule"         && <SchedulePage />}
           {page === "courses"          && <CoursesPage />}
           {page === "academicstatus"   && <AcademicStatusPage />}
+          {page === "windowone"        && <WindowOnePage />}
           {page === "settings"         && <SettingsPage />}
         </main>
       </div>

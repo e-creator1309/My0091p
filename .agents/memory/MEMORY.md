@@ -1,0 +1,2 @@
+- [Cloudflare Worker deployment](cf-worker-deploy.md) — how to upload the aspu-api worker script via Cloudflare API using Node.js + https (not curl -F).
+- [ASPU correct endpoint URLs](aspu-endpoints.md) — real ASPU URLs discovered from app.js; several were wrong in the old worker.
