@@ -935,13 +935,15 @@ function CurrentGradesPage() {
   if (error) return <ErrorBlock message={error} onRetry={refetch} />;
 
   const d = data as { courses: unknown[]; semester_name: string; max_tests_count: number } | null;
+  const maxTests = d?.max_tests_count ?? 0;
   const courses = (d?.courses ?? []) as Array<{
     course_name: string; course_code: string; course_credits: string;
     final_mark: string | null; grade: string | null;
     tests: {
-      archive_test_1: string | null; archive_test_2: string | null;
       archive_fixed_mark: string | null; archive_final_mark: string | null;
       final_mark: string | null; grade: string | null;
+      archive_total_mark?: string | null;
+      [key: string]: string | null | number | undefined;
     } | null;
   }>;
 
@@ -958,32 +960,56 @@ function CurrentGradesPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
-                <th className="text-right px-4 py-3 font-semibold text-gray-600">المقرر</th>
+                <th className="text-right px-4 py-3 font-semibold text-gray-600 min-w-[160px]">المقرر</th>
+                {Array.from({ length: maxTests }, (_, i) => (
+                  <th key={i} className="text-center px-3 py-3 font-semibold text-gray-600 whitespace-nowrap">
+                    اختبار {i + 1}
+                  </th>
+                ))}
                 <th className="text-center px-3 py-3 font-semibold text-gray-600 whitespace-nowrap">أعمال فصل</th>
-                <th className="text-center px-3 py-3 font-semibold text-gray-600">نهائي</th>
+                <th className="text-center px-3 py-3 font-semibold text-gray-600 whitespace-nowrap">نهائي</th>
+                <th className="text-center px-3 py-3 font-semibold text-gray-600 whitespace-nowrap">المجموع</th>
                 <th className="text-center px-3 py-3 font-semibold text-gray-600">التقدير</th>
               </tr>
             </thead>
             <tbody>
-              {courses.map((c, i) => (
-                <tr key={i} className="border-t border-gray-50 hover:bg-gray-50/50">
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-gray-800">{c.course_name}</p>
-                    <p className="text-xs text-gray-400">{c.course_code} · {c.course_credits} ساعة</p>
-                  </td>
-                  <td className="px-3 py-3 text-center">
-                    <span className="font-medium text-gray-700">{c.tests?.archive_fixed_mark ?? "—"}</span>
-                  </td>
-                  <td className="px-3 py-3 text-center">
-                    <span className="font-medium text-gray-700">{c.tests?.archive_final_mark ?? "—"}</span>
-                  </td>
-                  <td className="px-3 py-3 text-center">
-                    {c.grade ? (
-                      <span className={`text-xs font-bold px-2 py-1 rounded-lg ${gradeClass(c.grade)}`}>{c.grade}</span>
-                    ) : <span className="text-gray-300">—</span>}
-                  </td>
-                </tr>
-              ))}
+              {courses.map((c, i) => {
+                const totalMark = (c.tests?.archive_total_mark ?? c.tests?.final_mark ?? c.final_mark) as string | null;
+                const gradeVal = (c.tests?.grade ?? c.grade) as string | null;
+                return (
+                  <tr key={i} className="border-t border-gray-50 hover:bg-gray-50/50">
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-gray-800 leading-snug">{c.course_name}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{c.course_code} · {c.course_credits} ساعة</p>
+                    </td>
+                    {Array.from({ length: maxTests }, (_, ti) => {
+                      const key = "archive_test_" + (ti + 1);
+                      const val = c.tests ? (c.tests[key] as string | null) : null;
+                      return (
+                        <td key={ti} className="px-3 py-3 text-center whitespace-nowrap">
+                          <span className="font-medium text-gray-700 text-xs">{val ?? "—"}</span>
+                        </td>
+                      );
+                    })}
+                    <td className="px-3 py-3 text-center whitespace-nowrap">
+                      <span className="font-medium text-gray-700 text-xs">{c.tests?.archive_fixed_mark ?? "—"}</span>
+                    </td>
+                    <td className="px-3 py-3 text-center whitespace-nowrap">
+                      <span className="font-medium text-gray-700 text-xs">{c.tests?.archive_final_mark ?? "—"}</span>
+                    </td>
+                    <td className="px-3 py-3 text-center">
+                      {totalMark ? (
+                        <span className={"font-bold text-sm " + gradePercent(totalMark)}>{totalMark}</span>
+                      ) : <span className="text-gray-300 text-xs">—</span>}
+                    </td>
+                    <td className="px-3 py-3 text-center">
+                      {gradeVal ? (
+                        <span className={"text-xs font-bold px-2 py-1 rounded-lg " + gradeClass(gradeVal)}>{gradeVal}</span>
+                      ) : <span className="text-gray-300">—</span>}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
