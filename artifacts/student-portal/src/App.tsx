@@ -10,7 +10,7 @@ import {
   api, login, logout, getToken, setToken, clearToken,
   type PersonalProfile, type AcademicProfile, type FinancialProfile,
   type GradesData, type Semester, type RemainingCourses,
-  type ScheduleData, type ExamData, type WindowOneData,
+  type ScheduleData, type ExamData, type WindowOneData, type LectureSlot,
 } from "./lib/api";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -721,7 +721,7 @@ function SchedulePage() {
   }>;
 
   // Group lectures by day
-  const slots = (schedule?.courses ?? []) as import("./lib/api").LectureSlot[];
+  const slots = (schedule?.courses ?? []) as LectureSlot[];
   const dayOrder = ["السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"];
   const byDay = slots.reduce<Record<string, typeof slots>>((acc, slot) => {
     const d = slot.day_name ?? "غير محدد";
