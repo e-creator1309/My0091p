@@ -132,11 +132,15 @@ function useData<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
 // ─── Login Page ───────────────────────────────────────────────────────────────
 
 const REMEMBER_KEY = "aspu_remembered_username";
-
+const REMEMBER_PASS = "aspu_remembered_password";
 function LoginPage({ onLogin }: { onLogin: () => void }) {
   const savedUser = localStorage.getItem(REMEMBER_KEY) ?? "";
+  const savedPass = (() => {
+    try { const e = localStorage.getItem(REMEMBER_PASS); return e ? atob(e) : ""; }
+    catch { return ""; }
+  })();
   const [username, setUsername] = useState(savedUser);
-  const [password, setPassword] = useState("");
+  const [password, setPassword] = useState(savedPass);
   const [remember, setRemember] = useState(savedUser !== "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -151,9 +155,11 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
       setToken(token);
       // Save or clear remembered username based on checkbox
       if (remember) {
-        localStorage.setItem(REMEMBER_KEY, username.trim());
+        localStorage.setItem(REMEMBER_KEY,  username.trim());
+        localStorage.setItem(REMEMBER_PASS, btoa(password));
       } else {
         localStorage.removeItem(REMEMBER_KEY);
+        localStorage.removeItem(REMEMBER_PASS);
       }
       onLogin();
     } catch (err) {
