@@ -720,6 +720,21 @@ function SchedulePage() {
     day_name?: string;
   }>;
 
+  // Group lectures by day
+  const slots = (schedule?.courses ?? []) as import("./lib/api").LectureSlot[];
+  const dayOrder = ["السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"];
+  const byDay = slots.reduce<Record<string, typeof slots>>((acc, slot) => {
+    const d = slot.day_name ?? "غير محدد";
+    if (!acc[d]) acc[d] = [];
+    acc[d].push(slot);
+    return acc;
+  }, {});
+  const sortedDays = Object.keys(byDay).sort((a, b) => {
+    const ai = dayOrder.indexOf(a);
+    const bi = dayOrder.indexOf(b);
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+  });
+
   return (
     <div className="space-y-5 fade-in">
       {/* Lectures */}
@@ -727,7 +742,7 @@ function SchedulePage() {
         <SectionTitle>جدول المحاضرات</SectionTitle>
         {el ? (
           <ErrorBlock message={el} onRetry={rl} />
-        ) : (schedule?.courses ?? []).length === 0 ? (
+        ) : slots.length === 0 ? (
           <div className="flex flex-col items-center py-10 text-gray-300 gap-2">
             <Calendar size={32} />
             <p className="text-sm text-gray-400">
@@ -735,7 +750,65 @@ function SchedulePage() {
             </p>
           </div>
         ) : (
-          <p className="text-sm text-gray-500">يتم عرض البيانات كما وردت من الجامعة</p>
+          <div className="space-y-4">
+            {sortedDays.map((day) => (
+              <div key={day}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs font-bold text-[var(--aspu-green)] bg-[var(--aspu-green-light)] px-3 py-1 rounded-full">
+                    {day}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {(byDay[day] ?? [])
+                    .slice()
+                    .sort((a, b) => Number(a.period_id ?? 0) - Number(b.period_id ?? 0))
+                    .map((slot, i) => {
+                      const time =
+                        slot.period_from && slot.period_to
+                          ? `${slot.period_from} – ${slot.period_to}`
+                          : slot.period_name ?? "—";
+                      const instructor =
+                        [slot.t_instructor_name, slot.p_instructor_name]
+                          .filter(Boolean)
+                          .join(" / ") || null;
+                      return (
+                        <div
+                          key={i}
+                          className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 bg-gray-50 rounded-xl px-4 py-3 border-r-4"
+                          style={{ borderColor: slot.color ?? "var(--aspu-green)" }}
+                        >
+                          {/* Time */}
+                          <span className="text-xs font-mono text-gray-500 shrink-0 ltr min-w-[110px]">
+                            {time}
+                          </span>
+                          {/* Course */}
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-sm text-gray-800 leading-snug">
+                              {slot.course_name ?? "—"}
+                            </p>
+                            <p className="text-xs text-gray-400 mt-0.5">
+                              {slot.course_code}
+                              {slot.course_credits ? ` · ${slot.course_credits} ساعة` : ""}
+                              {slot.period_name ? ` · ${slot.period_name}` : ""}
+                            </p>
+                          </div>
+                          {/* Instructor */}
+                          {instructor && (
+                            <p className="text-xs text-gray-500 shrink-0 text-left">{instructor}</p>
+                          )}
+                          {/* Room */}
+                          {slot.room_name && (
+                            <span className="text-xs bg-white border border-gray-200 text-gray-600 px-2.5 py-1 rounded-lg shrink-0">
+                              {slot.room_name}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </Card>
 
@@ -781,6 +854,7 @@ function SchedulePage() {
     </div>
   );
 }
+
 
 function CoursesPage() {
   const { data, loading, error, refetch } = useData(() => api.remaining());
