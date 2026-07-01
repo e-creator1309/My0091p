@@ -1,0 +1,49 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build student portal
+        env:
+          BASE_PATH: /My0091p/
+          PORT: "3000"
+          NODE_ENV: production
+          # URL of the deployed Replit api-server (set this in GitHub repo secrets)
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+        run: pnpm --filter @workspace/student-portal run build
+
+      - name: Add .nojekyll
+        run: touch artifacts/student-portal/dist/.nojekyll
+
+      - name: Copy 404.html for SPA routing
+        run: cp artifacts/student-portal/dist/index.html artifacts/student-portal/dist/404.html
+
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./artifacts/student-portal/dist
+          force_orphan: true
