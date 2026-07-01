@@ -2,10 +2,10 @@ import { Download, useState, useEffect, useCallback, type ReactNode } from "reac
 import {
   LayoutDashboard, BookOpen, GraduationCap, Calendar,
   Wallet, ListChecks, LogOut, Menu, X, ChevronDown,
-  User, AlertCircle, Loader2, RefreshCw, Bell,
+  User, AlertCircle, Loader2, RefreshCw, Bell, BellOff, BellRing,
   ClipboardList, CreditCard, Settings, TrendingUp, ChevronRight,
   Inbox, CheckCircle, Clock, XCircle,
-, BellOff, BellRing} from 'lucide-react';
+} from "lucide-react";
 import {
   api, login, logout, getToken, setToken, clearToken,
   type PersonalProfile, type AcademicProfile, type FinancialProfile,
@@ -385,12 +385,39 @@ function Sidebar({
   );
 }
 
+// ─── Notifications ────────────────────────────────────────────────────────────
+
+function useNotifications() {
+  const [permission, setPermission] = useState<NotificationPermission>(
+    typeof Notification !== "undefined" ? Notification.permission : "denied"
+  );
+  const request = useCallback(async () => {
+    if (typeof Notification === "undefined") return "denied" as NotificationPermission;
+    const result = await Notification.requestPermission();
+    setPermission(result);
+    return result;
+  }, []);
+  const send = useCallback((title: string, body: string) => {
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    const n = new Notification(title, {
+      body,
+      icon: "/My0091p/icon-192.png",
+      badge: "/My0091p/icon-192.png",
+      dir: "rtl",
+      lang: "ar",
+    });
+    n.onclick = () => { window.focus(); n.close(); };
+  }, []);
+  return { permission, request, send };
+}
+
 // ─── Pages ────────────────────────────────────────────────────────────────────
 
 function OverviewPage({ username }: { username: string }) {
   const { data: dash, loading, error, refetch } = useData(() => api.dashboard());
   const { data: academic } = useData(() => api.academic());
   const { data: announcements } = useData(() => api.announcements());
+  const { permission, request } = useNotifications();
 
   if (loading) return <LoadingBlock />;
   if (error) return <ErrorBlock message={error} onRetry={refetch} />;
@@ -398,8 +425,6 @@ function OverviewPage({ username }: { username: string }) {
   const acad = academic as AcademicProfile | null;
   const anns = (announcements ?? []) as Array<{ title: string; body: string; date: string }>;
   const dashData = dash as { first_name?: string } | null;
-
-  const { permission, request } = useNotifications();
 
   return (
     <div className="space-y-5 fade-in">
@@ -416,16 +441,15 @@ function OverviewPage({ username }: { username: string }) {
             <p className="text-sm font-semibold text-emerald-800">فعّل إشعارات العلامات</p>
             <p className="text-xs text-emerald-600 mt-0.5">سنخبرك فور صدور علامة جديدة</p>
           </div>
-          <span className="text-xs text-emerald-500 shrink-0">اضغط هنا</span>
+          <span className="text-xs text-emerald-500 shrink-0">اضغط هنا ←</span>
         </button>
       )}
       {permission === "denied" && (
         <div className="flex items-center gap-3 bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3">
           <BellOff size={16} className="text-gray-400 shrink-0" />
-          <p className="text-xs text-gray-400">الإشعارات محجوبة — فعّلها من إعدادات المتصفح لو تريد تنبيهات العلامات</p>
+          <p className="text-xs text-gray-400">الإشعارات محجوبة — فعّلها من إعدادات المتصفح لتلقي تنبيهات العلامات</p>
         </div>
       )}
-
       {/* Welcome banner */}
       <div className="bg-gradient-to-l from-[var(--aspu-green)] to-emerald-400 text-white rounded-2xl p-6">
         <p className="text-emerald-100 text-sm">مرحباً بك،</p>
@@ -968,35 +992,32 @@ function CurrentGradesPage() {
   const { data, loading, error, refetch } = useData(() => api.currentGrades());
   const { send: sendNotif } = useNotifications();
 
-  // Grade change detection
   useEffect(() => {
     if (!data) return;
-    const key = "aspu_grades_snapshot";
+    const SNAP_KEY = "aspu_grades_v1";
     const snapshot = JSON.stringify(data);
-    const prev = localStorage.getItem(key);
+    const prev = localStorage.getItem(SNAP_KEY);
     if (prev && prev !== snapshot) {
-      // Find what changed
       try {
-        const prevData = JSON.parse(prev) as { courses?: Array<{ course_name: string; tests?: { final_mark?: string | null } | null; final_mark?: string | null }> };
-        const newData  = data as typeof prevData;
+        type CourseEntry = { course_name: string; tests?: { final_mark?: string | null } | null; final_mark?: string | null };
+        const prevCourses = (JSON.parse(prev) as { courses?: CourseEntry[] }).courses ?? [];
+        const newCourses  = (data as { courses?: CourseEntry[] }).courses ?? [];
         const changed: string[] = [];
-        (newData.courses ?? []).forEach((nc, i) => {
-          const pc = prevData.courses?.[i];
-          const newMark = nc.tests?.final_mark ?? nc.final_mark;
-          const oldMark = pc?.tests?.final_mark ?? pc?.final_mark;
-          if (newMark && newMark !== oldMark) changed.push(nc.course_name);
+        newCourses.forEach((nc, i) => {
+          const pc = prevCourses[i];
+          const n = nc.tests?.final_mark ?? nc.final_mark;
+          const o = pc?.tests?.final_mark ?? pc?.final_mark;
+          if (n && n !== o) changed.push(nc.course_name);
         });
         if (changed.length > 0) {
           sendNotif(
-            "🎓 علامة جديدة في بوابة الطالب",
-            changed.length === 1
-              ? `صدرت علامة: ${changed[0]}`
-              : `صدرت ${changed.length} علامات جديدة`
+            "🎓 علامة جديدة — بوابة ASPU",
+            changed.length === 1 ? `صدرت علامة: ${changed[0]}` : `صدرت ${changed.length} علامات جديدة`
           );
         }
-      } catch { /* ignore parse errors */ }
+      } catch { /* ignore */ }
     }
-    localStorage.setItem(key, snapshot);
+    localStorage.setItem(SNAP_KEY, snapshot);
   }, [data, sendNotif]);
 
   if (loading) return <LoadingBlock />;
