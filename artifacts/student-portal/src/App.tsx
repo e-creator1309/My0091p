@@ -5,7 +5,7 @@ import {
   User, AlertCircle, Loader2, RefreshCw, Bell,
   ClipboardList, CreditCard, Settings, TrendingUp, ChevronRight,
   Inbox, CheckCircle, Clock, XCircle,
-} from "lucide-react";
+, BellOff, BellRing} from 'lucide-react';
 import {
   api, login, logout, getToken, setToken, clearToken,
   type PersonalProfile, type AcademicProfile, type FinancialProfile,
@@ -399,8 +399,33 @@ function OverviewPage({ username }: { username: string }) {
   const anns = (announcements ?? []) as Array<{ title: string; body: string; date: string }>;
   const dashData = dash as { first_name?: string } | null;
 
+  const { permission, request } = useNotifications();
+
   return (
     <div className="space-y-5 fade-in">
+      {/* Notification permission banner */}
+      {permission === "default" && (
+        <button
+          onClick={request}
+          className="w-full flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-3 text-right hover:bg-emerald-100 transition"
+        >
+          <span className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+            <BellRing size={18} className="text-emerald-600" />
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-emerald-800">فعّل إشعارات العلامات</p>
+            <p className="text-xs text-emerald-600 mt-0.5">سنخبرك فور صدور علامة جديدة</p>
+          </div>
+          <span className="text-xs text-emerald-500 shrink-0">اضغط هنا</span>
+        </button>
+      )}
+      {permission === "denied" && (
+        <div className="flex items-center gap-3 bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3">
+          <BellOff size={16} className="text-gray-400 shrink-0" />
+          <p className="text-xs text-gray-400">الإشعارات محجوبة — فعّلها من إعدادات المتصفح لو تريد تنبيهات العلامات</p>
+        </div>
+      )}
+
       {/* Welcome banner */}
       <div className="bg-gradient-to-l from-[var(--aspu-green)] to-emerald-400 text-white rounded-2xl p-6">
         <p className="text-emerald-100 text-sm">مرحباً بك،</p>
@@ -941,6 +966,38 @@ function CoursesPage() {
 
 function CurrentGradesPage() {
   const { data, loading, error, refetch } = useData(() => api.currentGrades());
+  const { send: sendNotif } = useNotifications();
+
+  // Grade change detection
+  useEffect(() => {
+    if (!data) return;
+    const key = "aspu_grades_snapshot";
+    const snapshot = JSON.stringify(data);
+    const prev = localStorage.getItem(key);
+    if (prev && prev !== snapshot) {
+      // Find what changed
+      try {
+        const prevData = JSON.parse(prev) as { courses?: Array<{ course_name: string; tests?: { final_mark?: string | null } | null; final_mark?: string | null }> };
+        const newData  = data as typeof prevData;
+        const changed: string[] = [];
+        (newData.courses ?? []).forEach((nc, i) => {
+          const pc = prevData.courses?.[i];
+          const newMark = nc.tests?.final_mark ?? nc.final_mark;
+          const oldMark = pc?.tests?.final_mark ?? pc?.final_mark;
+          if (newMark && newMark !== oldMark) changed.push(nc.course_name);
+        });
+        if (changed.length > 0) {
+          sendNotif(
+            "🎓 علامة جديدة في بوابة الطالب",
+            changed.length === 1
+              ? `صدرت علامة: ${changed[0]}`
+              : `صدرت ${changed.length} علامات جديدة`
+          );
+        }
+      } catch { /* ignore parse errors */ }
+    }
+    localStorage.setItem(key, snapshot);
+  }, [data, sendNotif]);
 
   if (loading) return <LoadingBlock />;
   if (error) return <ErrorBlock message={error} onRetry={refetch} />;
