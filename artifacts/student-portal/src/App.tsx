@@ -265,9 +265,10 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
         </div>
 
         {/* Developer credit */}
-        <p className="text-center text-emerald-200/70 text-xs mt-6">
-          المطور: عماد الدين النسمة
-        </p>
+        <div className="text-center mt-6 space-y-1">
+          <p className="text-emerald-200/70 text-xs">المطور: عماد الدين النسمة</p>
+          <p className="text-emerald-100/50 text-xs">طالب علوم إدارية — اختصاص موارد بشرية</p>
+        </div>
       </div>
     </div>
   );
