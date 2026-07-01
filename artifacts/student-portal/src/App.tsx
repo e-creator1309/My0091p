@@ -114,6 +114,7 @@ function useData<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
       })
       .catch((e: Error) => {
         if (e.message === "SESSION_EXPIRED") {
+          setLoading(false);
           window.dispatchEvent(new Event("session-expired"));
           return;
         }
