@@ -170,11 +170,6 @@ export interface ScheduleData { courses: LectureSlot[]; instructors: unknown[]; 
 export interface ExamData { exams: unknown[]; }
 export interface CalendarEventsData {
   events: Array<{
-Diff: api.ts
-
-export interface ExamData { exams: unknown[]; }
-export interface CalendarEventsData {
-  events: Array<{
     date: string; type: string; course_name?: string; note?: string;
   }>;
   labels: Array<{ text: string | null; value: string; color: string }>;
