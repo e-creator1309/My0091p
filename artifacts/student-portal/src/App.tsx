@@ -131,9 +131,13 @@ function useData<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
 
 // ─── Login Page ───────────────────────────────────────────────────────────────
 
+const REMEMBER_KEY = "aspu_remembered_username";
+
 function LoginPage({ onLogin }: { onLogin: () => void }) {
-  const [username, setUsername] = useState("");
+  const savedUser = localStorage.getItem(REMEMBER_KEY) ?? "";
+  const [username, setUsername] = useState(savedUser);
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(savedUser !== "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -145,6 +149,12 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
     try {
       const token = await login(username.trim(), password);
       setToken(token);
+      // Save or clear remembered username based on checkbox
+      if (remember) {
+        localStorage.setItem(REMEMBER_KEY, username.trim());
+      } else {
+        localStorage.removeItem(REMEMBER_KEY);
+      }
       onLogin();
     } catch (err) {
       setError((err as Error).message);
@@ -208,6 +218,31 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
               />
             </div>
 
+            {/* Remember me */}
+            <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+              <div className="relative">
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                  className="sr-only"
+                  disabled={loading}
+                />
+                <div className={`w-5 h-5 rounded-md border-2 transition-colors flex items-center justify-center
+                  ${remember
+                    ? "bg-[var(--aspu-green)] border-[var(--aspu-green)]"
+                    : "bg-white border-gray-300 group-hover:border-[var(--aspu-green)]"
+                  }`}>
+                  {remember && (
+                    <svg width="11" height="9" viewBox="0 0 11 9" fill="none">
+                      <path d="M1 4L4 7.5L10 1" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  )}
+                </div>
+              </div>
+              <span className="text-sm text-gray-600">تذكّرني</span>
+            </label>
+
             <button
               type="submit"
               disabled={loading || !username.trim() || !password}
@@ -222,6 +257,11 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
             يتم استخدام نفس بيانات دخول بوابة ASPU
           </p>
         </div>
+
+        {/* Developer credit */}
+        <p className="text-center text-emerald-200/70 text-xs mt-6">
+          المطور: عماد الدين النسمة
+        </p>
       </div>
     </div>
   );
