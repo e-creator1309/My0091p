@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type ReactNode } from "react";
+import { Download, useState, useEffect, useCallback, type ReactNode } from "react";
 import {
   LayoutDashboard, BookOpen, GraduationCap, Calendar,
   Wallet, ListChecks, LogOut, Menu, X, ChevronDown,
@@ -293,7 +293,7 @@ const NAV_ITEMS: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
 ];
 
 function Sidebar({
-  page, setPage, onLogout, collapsed, setCollapsed, username,
+  page, setPage, onLogout, collapsed, setCollapsed, username, installPrompt, onInstall,
 }: {
   page: Page;
   setPage: (p: Page) => void;
@@ -301,6 +301,8 @@ function Sidebar({
   collapsed: boolean;
   setCollapsed: (v: boolean) => void;
   username: string;
+  installPrompt: boolean;
+  onInstall: () => void;
 }) {
   return (
     <>
@@ -359,8 +361,17 @@ function Sidebar({
           ))}
         </nav>
 
-        {/* Logout */}
-        <div className="p-3 border-t border-white/10">
+        {/* Install + Logout */}
+        <div className="p-3 border-t border-white/10 space-y-1">
+          {installPrompt && (
+            <button
+              onClick={onInstall}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-emerald-200 bg-white/10 hover:bg-white/20 transition"
+            >
+              <Download size={18} className="shrink-0" />
+              {!collapsed && <span>تثبيت التطبيق</span>}
+            </button>
+          )}
           <button
             onClick={onLogout}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-red-300 hover:bg-red-900/30 transition"
@@ -1454,6 +1465,19 @@ function AppLayout({
 }) {
   const [page, setPage] = useState<Page>("overview");
   const [collapsed, setCollapsed] = useState(true);
+  const [deferredPrompt, setDeferredPrompt] = useState<Event | null>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => { e.preventDefault(); setDeferredPrompt(e); };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const handleInstall = () => {
+    if (!deferredPrompt) return;
+    (deferredPrompt as BeforeInstallPromptEvent).prompt();
+    (deferredPrompt as BeforeInstallPromptEvent).userChoice.then(() => setDeferredPrompt(null));
+  };
 
   const pageTitle = NAV_ITEMS.find((n) => n.id === page)?.label ?? "";
 
@@ -1466,6 +1490,8 @@ function AppLayout({
         collapsed={collapsed}
         setCollapsed={setCollapsed}
         username={username}
+        installPrompt={!!deferredPrompt}
+        onInstall={handleInstall}
       />
 
       {/* Main content */}
