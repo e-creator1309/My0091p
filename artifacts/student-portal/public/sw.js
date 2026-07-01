@@ -1,5 +1,5 @@
-// ASPU Student Portal — Service Worker v2
-const CACHE = 'aspu-v2';
+// ASPU Student Portal — Service Worker v3
+const CACHE = 'aspu-v3';
 const OFFLINE_URL = '/My0091p/offline.html';
 
 const PRECACHE = [
@@ -27,11 +27,8 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = e.request.url;
-
-  // Never intercept API / worker calls
   if (url.includes('workers.dev') || e.request.method !== 'GET') return;
 
-  // Navigation requests: network first, offline.html as fallback
   if (e.request.mode === 'navigate') {
     e.respondWith(
       fetch(e.request)
@@ -46,7 +43,6 @@ self.addEventListener('fetch', e => {
     return;
   }
 
-  // Assets: cache first, network fallback
   e.respondWith(
     caches.match(e.request).then(cached => {
       const networkFetch = fetch(e.request)
@@ -56,6 +52,19 @@ self.addEventListener('fetch', e => {
         })
         .catch(() => cached || new Response('Offline', { status: 503 }));
       return cached || networkFetch;
+    })
+  );
+});
+
+// Open the app when user taps a notification
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+      for (const client of list) {
+        if (client.url.includes('/My0091p/') && 'focus' in client) return client.focus();
+      }
+      return clients.openWindow('/My0091p/');
     })
   );
 });
