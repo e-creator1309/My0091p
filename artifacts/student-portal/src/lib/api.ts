@@ -147,26 +147,9 @@ export interface GradesStatusData {
   degree: string; degree_name: string;
 }
 
-export interface LectureSlot {
-  course_name?: string;
-  course_code?: string;
-  course_credits?: string;
-  day_id?: string | number;
-  day_name?: string;
-  short_day_name?: string;
-  period_id?: string | number;
-  period_name?: string;
-  period_from?: string;
-  period_to?: string;
-  t_instructor_name?: string | null;
-  p_instructor_name?: string | null;
-  room_ids?: string | null;
-  room_name?: string | null;
-  group_num?: string | number | null;
-  section_num?: string | number | null;
-  color?: string | null;
-}
-export interface ScheduleData { courses: LectureSlot[]; instructors: unknown[]; }
+
+export interface LectureSlot { course_id: string; course_name: string; course_code: string; course_credits: string; sat?: string; sun?: string; mon?: string; tus?: string; wed?: string; thu?: string; fri?: string; t_instructor_name?: string | null; p_instructor_name?: string | null; }
+export interface ScheduleData { courses: LectureSlot[]; instructors: LectureSlot[]; exams: unknown[]; }
 export interface ExamData { exams: unknown[]; }
 export interface CalendarEventsData {
   events: Array<{
