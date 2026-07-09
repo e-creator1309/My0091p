@@ -792,36 +792,47 @@ interface ParsedSlot {
 }
 
 /**
- * Parses ASPU HTML day-column cells, e.g.:
+ * Parses a single ASPU day-column cell like:
  *   "P 10:00-11:00<br> قاعة 15 - 27T 08:00-10:00<br> قاعة 15 - 27"
- * Returns one slot per T/P entry.
+ *
+ * Strategy: split by <br> — each part may start with a room name followed by
+ * the next slot header ([T|P] HH:MM-HH:MM) all on the same piece of text.
  */
 function parseDaySlots(raw: string, dayKey: string, course: CourseRow): ParsedSlot[] {
-  if (!raw?.trim() || raw.trim() === '') return [];
+  if (!raw?.trim()) return [];
   const out: ParsedSlot[] = [];
-  // Handle <br>, <br/>, <br /> and plain newline as separator
-  const normalised = raw.replace(/<br\s*\/?>/gi, '\n');
-  const lines = normalised.split('\n').map(l => l.trim()).filter(Boolean);
+  const parts = raw.split(/<br\s*\/?>/i).map(p => p.trim()).filter(Boolean);
   let pending: { type: 'T' | 'P'; time: string } | null = null;
-  for (const line of lines) {
-    // Line that starts with T or P followed by time range
-    const slotMatch = line.match(/^([TP])\s+(\d{1,2}:\d{2}-\d{1,2}:\d{2})(.*)?$/);
-    if (slotMatch) {
+
+  for (const part of parts) {
+    // Find the first slot header [T|P] HH:MM-HH:MM anywhere in the part
+    const headerIdx = part.search(/[TP] \d{1,2}:\d{2}-\d{1,2}:\d{2}/);
+
+    if (headerIdx === -1) {
+      // Entire part is a room (or trailing room text) for the pending slot
       if (pending) {
-        // flush previous slot with no room
-        out.push({ type: pending.type, time: pending.time, room: '', dayKey, course });
-      }
-      pending = { type: slotMatch[1] as 'T' | 'P', time: slotMatch[2] };
-      // Same line may have trailing room after the time
-      const trailingRoom = slotMatch[3]?.trim() ?? '';
-      if (trailingRoom) {
-        out.push({ type: pending.type, time: pending.time, room: trailingRoom, dayKey, course });
+        out.push({ type: pending.type, time: pending.time, room: part, dayKey, course });
         pending = null;
       }
-    } else if (pending) {
-      // This line is the room for the pending slot
-      out.push({ type: pending.type, time: pending.time, room: line, dayKey, course });
-      pending = null;
+    } else {
+      // Text before the header is the room of the previous (pending) slot
+      const roomText = part.slice(0, headerIdx).trim();
+      if (pending !== null) {
+        out.push({ type: pending.type, time: pending.time, room: roomText, dayKey, course });
+        pending = null;
+      }
+      // Parse the new slot header starting at headerIdx
+      const fromHeader = part.slice(headerIdx);
+      const m = fromHeader.match(/^([TP]) (\d{1,2}:\d{2}-\d{1,2}:\d{2})(.*)?$/);
+      if (m) {
+        const trailing = m[3]?.trim() ?? '';
+        if (trailing) {
+          // Room is on the same piece after the time
+          out.push({ type: m[1] as 'T' | 'P', time: m[2], room: trailing, dayKey, course });
+        } else {
+          pending = { type: m[1] as 'T' | 'P', time: m[2] };
+        }
+      }
     }
   }
   if (pending) out.push({ type: pending.type, time: pending.time, room: '', dayKey, course });
@@ -829,7 +840,7 @@ function parseDaySlots(raw: string, dayKey: string, course: CourseRow): ParsedSl
 }
 
 /**
- * Builds a map of dayKey -> slots from courses with sat/sun/mon… HTML columns.
+ * Iterates all day columns of a course list and returns a map of dayKey -> ParsedSlot[].
  */
 function buildDaySlots(
   courseList: CourseRow[],
@@ -852,7 +863,6 @@ function buildDaySlots(
       }
     }
   }
-  // Sort each day by start time
   for (const k of Object.keys(byDay)) {
     byDay[k].sort((a, b) => a.time.localeCompare(b.time));
   }
@@ -860,18 +870,18 @@ function buildDaySlots(
 }
 
 /**
- * Detects whether the raw API response is day-column format or slot-row format,
- * then builds and returns the same byDay map either way.
+ * Accepts the raw API response (any shape) and returns:
+ *  - byDay: dayKey -> sorted ParsedSlot[]
+ *  - coursesByCourseId: courseId -> ParsedSlot[] (for registration cross-ref)
  */
 function buildScheduleFromRaw(raw: unknown): {
   byDay: Record<string, ParsedSlot[]>;
   coursesByCourseId: Record<string, ParsedSlot[]>;
 } {
   if (!raw || typeof raw !== 'object') return { byDay: {}, coursesByCourseId: {} };
-
   const obj = raw as Record<string, unknown>;
 
-  // Collect the items array — try several common shapes
+  // Find courses array — handle several common JSON shapes
   let items: CourseRow[] = [];
   if (Array.isArray(obj)) {
     items = obj as CourseRow[];
@@ -882,20 +892,20 @@ function buildScheduleFromRaw(raw: unknown): {
   }
 
   const instructorMap: Record<string, CourseRow> = {};
-  const instructors = Array.isArray(obj['instructors']) ? (obj['instructors'] as CourseRow[]) : [];
-  for (const inst of instructors) instructorMap[inst.course_id] = inst;
+  for (const inst of (Array.isArray(obj['instructors']) ? obj['instructors'] as CourseRow[] : [])) {
+    instructorMap[inst.course_id] = inst;
+  }
 
-  // Determine format: day-column vs slot-row
   const sample = items[0] as Record<string, unknown> | undefined;
-  const hasDayColumns = sample && DAY_KEYS.some(k => typeof sample[k] === 'string');
-  const hasSlotRows = sample && ('day_name' in sample || 'period_from' in sample);
+  const hasDayColumns = !!sample && DAY_KEYS.some(k => typeof sample[k] === 'string' && (sample[k] as string).trim() !== '');
+  const hasSlotRows = !!sample && ('day_name' in sample || 'period_from' in sample);
 
   let byDay: Record<string, ParsedSlot[]> = {};
 
   if (hasDayColumns) {
     byDay = buildDaySlots(items, instructorMap);
   } else if (hasSlotRows) {
-    // Row-per-slot format: each item is one lecture slot
+    // Row-per-slot format: each item is one lecture entry
     const AR_DAY_TO_KEY: Record<string, string> = {
       'السبت': 'sat', 'الأحد': 'sun', 'الاثنين': 'mon',
       'الثلاثاء': 'tus', 'الأربعاء': 'wed', 'الخميس': 'thu', 'الجمعة': 'fri',
@@ -907,19 +917,18 @@ function buildScheduleFromRaw(raw: unknown): {
       const from = row.period_from ?? '';
       const to = row.period_to ?? '';
       const time = from && to ? `${from}-${to}` : row.period_name ?? '—';
-      const slot: ParsedSlot = { type, time, room: row.room_name ?? '', dayKey, course: row };
       if (!byDay[dayKey]) byDay[dayKey] = [];
-      byDay[dayKey].push(slot);
+      byDay[dayKey].push({ type, time, room: row.room_name ?? '', dayKey, course: row });
     }
     for (const k of Object.keys(byDay)) {
       byDay[k].sort((a, b) => a.time.localeCompare(b.time));
     }
   }
 
-  // Build per-course map for easy lookup in registration page
+  // Build per-course lookup map
   const coursesByCourseId: Record<string, ParsedSlot[]> = {};
-  for (const daySlots of Object.values(byDay)) {
-    for (const slot of daySlots) {
+  for (const slots of Object.values(byDay)) {
+    for (const slot of slots) {
       const id = slot.course.course_id;
       if (!coursesByCourseId[id]) coursesByCourseId[id] = [];
       coursesByCourseId[id].push(slot);
