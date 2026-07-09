@@ -765,6 +765,7 @@ function FinancialPage() {
 }
 
 
+
 // ─── Schedule helpers ─────────────────────────────────────────────────────────
 
 const DAY_MAP: Record<string, string> = {
@@ -778,46 +779,154 @@ interface CourseRow {
   course_id: string; course_name: string; course_code: string; course_credits: string;
   sat?: string; sun?: string; mon?: string; tus?: string; wed?: string; thu?: string; fri?: string;
   t_instructor_name?: string | null; p_instructor_name?: string | null;
+  day_name?: string; period_from?: string; period_to?: string;
+  period_name?: string; room_name?: string; lecture_type?: string;
 }
 
 interface ParsedSlot {
   type: 'T' | 'P';
   time: string;
   room: string;
+  dayKey: string;
   course: CourseRow;
 }
 
-/** Parses ASPU's HTML-packed day cell: "P 10:00-11:00<br> قاعة 15 - 27T 08:00-10:00<br> قاعة 15 - 27" */
-function parseDaySlots(raw: string, course: CourseRow): ParsedSlot[] {
-  if (!raw?.trim()) return [];
+/**
+ * Parses ASPU HTML day-column cells, e.g.:
+ *   "P 10:00-11:00<br> قاعة 15 - 27T 08:00-10:00<br> قاعة 15 - 27"
+ * Returns one slot per T/P entry.
+ */
+function parseDaySlots(raw: string, dayKey: string, course: CourseRow): ParsedSlot[] {
+  if (!raw?.trim() || raw.trim() === '') return [];
   const out: ParsedSlot[] = [];
-  // Each slot: (T|P) HH:MM-HH:MM<br> ROOM  — room ends at next T/P digit or string end
-  const re = /([TP]) (d{1,2}:d{2}-d{1,2}:d{2})<br>s*(.*?)(?=s*[TP] d|$)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(raw)) !== null) {
-    out.push({ type: m[1] as 'T'|'P', time: m[2], room: m[3].trim(), course });
+  // Handle <br>, <br/>, <br /> and plain newline as separator
+  const normalised = raw.replace(/<br\s*\/?>/gi, '\n');
+  const lines = normalised.split('\n').map(l => l.trim()).filter(Boolean);
+  let pending: { type: 'T' | 'P'; time: string } | null = null;
+  for (const line of lines) {
+    // Line that starts with T or P followed by time range
+    const slotMatch = line.match(/^([TP])\s+(\d{1,2}:\d{2}-\d{1,2}:\d{2})(.*)?$/);
+    if (slotMatch) {
+      if (pending) {
+        // flush previous slot with no room
+        out.push({ type: pending.type, time: pending.time, room: '', dayKey, course });
+      }
+      pending = { type: slotMatch[1] as 'T' | 'P', time: slotMatch[2] };
+      // Same line may have trailing room after the time
+      const trailingRoom = slotMatch[3]?.trim() ?? '';
+      if (trailingRoom) {
+        out.push({ type: pending.type, time: pending.time, room: trailingRoom, dayKey, course });
+        pending = null;
+      }
+    } else if (pending) {
+      // This line is the room for the pending slot
+      out.push({ type: pending.type, time: pending.time, room: line, dayKey, course });
+      pending = null;
+    }
   }
+  if (pending) out.push({ type: pending.type, time: pending.time, room: '', dayKey, course });
   return out;
 }
 
-function buildDaySlots(courseList: CourseRow[], instructorMap: Record<string, CourseRow>): Record<string, ParsedSlot[]> {
+/**
+ * Builds a map of dayKey -> slots from courses with sat/sun/mon… HTML columns.
+ */
+function buildDaySlots(
+  courseList: CourseRow[],
+  instructorMap: Record<string, CourseRow>
+): Record<string, ParsedSlot[]> {
   const byDay: Record<string, ParsedSlot[]> = {};
   for (const course of courseList) {
     const inst = instructorMap[course.course_id] ?? {};
-    const enriched: CourseRow = { ...course, t_instructor_name: inst.t_instructor_name, p_instructor_name: inst.p_instructor_name };
+    const enriched: CourseRow = {
+      ...course,
+      t_instructor_name: inst.t_instructor_name ?? course.t_instructor_name,
+      p_instructor_name: inst.p_instructor_name ?? course.p_instructor_name,
+    };
     for (const dayKey of DAY_KEYS) {
-      const slots = parseDaySlots((course as Record<string,string>)[dayKey] ?? '', enriched);
+      const raw = (course as Record<string, string>)[dayKey] ?? '';
+      const slots = parseDaySlots(raw, dayKey, enriched);
       if (slots.length > 0) {
         if (!byDay[dayKey]) byDay[dayKey] = [];
         byDay[dayKey].push(...slots);
       }
     }
   }
-  // Sort each day's slots by start time
+  // Sort each day by start time
   for (const k of Object.keys(byDay)) {
     byDay[k].sort((a, b) => a.time.localeCompare(b.time));
   }
   return byDay;
+}
+
+/**
+ * Detects whether the raw API response is day-column format or slot-row format,
+ * then builds and returns the same byDay map either way.
+ */
+function buildScheduleFromRaw(raw: unknown): {
+  byDay: Record<string, ParsedSlot[]>;
+  coursesByCourseId: Record<string, ParsedSlot[]>;
+} {
+  if (!raw || typeof raw !== 'object') return { byDay: {}, coursesByCourseId: {} };
+
+  const obj = raw as Record<string, unknown>;
+
+  // Collect the items array — try several common shapes
+  let items: CourseRow[] = [];
+  if (Array.isArray(obj)) {
+    items = obj as CourseRow[];
+  } else if (Array.isArray(obj['courses'])) {
+    items = obj['courses'] as CourseRow[];
+  } else if (obj['data'] && Array.isArray((obj['data'] as Record<string, unknown>)['courses'])) {
+    items = ((obj['data'] as Record<string, unknown>)['courses']) as CourseRow[];
+  }
+
+  const instructorMap: Record<string, CourseRow> = {};
+  const instructors = Array.isArray(obj['instructors']) ? (obj['instructors'] as CourseRow[]) : [];
+  for (const inst of instructors) instructorMap[inst.course_id] = inst;
+
+  // Determine format: day-column vs slot-row
+  const sample = items[0] as Record<string, unknown> | undefined;
+  const hasDayColumns = sample && DAY_KEYS.some(k => typeof sample[k] === 'string');
+  const hasSlotRows = sample && ('day_name' in sample || 'period_from' in sample);
+
+  let byDay: Record<string, ParsedSlot[]> = {};
+
+  if (hasDayColumns) {
+    byDay = buildDaySlots(items, instructorMap);
+  } else if (hasSlotRows) {
+    // Row-per-slot format: each item is one lecture slot
+    const AR_DAY_TO_KEY: Record<string, string> = {
+      'السبت': 'sat', 'الأحد': 'sun', 'الاثنين': 'mon',
+      'الثلاثاء': 'tus', 'الأربعاء': 'wed', 'الخميس': 'thu', 'الجمعة': 'fri',
+    };
+    for (const row of items) {
+      const dayKey = AR_DAY_TO_KEY[row.day_name ?? ''] ?? row.day_name ?? 'other';
+      const typeRaw = (row.lecture_type ?? 'T').toUpperCase();
+      const type: 'T' | 'P' = typeRaw.startsWith('P') ? 'P' : 'T';
+      const from = row.period_from ?? '';
+      const to = row.period_to ?? '';
+      const time = from && to ? `${from}-${to}` : row.period_name ?? '—';
+      const slot: ParsedSlot = { type, time, room: row.room_name ?? '', dayKey, course: row };
+      if (!byDay[dayKey]) byDay[dayKey] = [];
+      byDay[dayKey].push(slot);
+    }
+    for (const k of Object.keys(byDay)) {
+      byDay[k].sort((a, b) => a.time.localeCompare(b.time));
+    }
+  }
+
+  // Build per-course map for easy lookup in registration page
+  const coursesByCourseId: Record<string, ParsedSlot[]> = {};
+  for (const daySlots of Object.values(byDay)) {
+    for (const slot of daySlots) {
+      const id = slot.course.course_id;
+      if (!coursesByCourseId[id]) coursesByCourseId[id] = [];
+      coursesByCourseId[id].push(slot);
+    }
+  }
+
+  return { byDay, coursesByCourseId };
 }
 
 function SchedulePage() {
@@ -826,14 +935,7 @@ function SchedulePage() {
 
   if (ll || le) return <LoadingBlock />;
 
-  const scheduleRaw = lec as { courses?: CourseRow[]; instructors?: CourseRow[] } | null;
-  const courseList = (scheduleRaw?.courses ?? []) as CourseRow[];
-  const instructorMap: Record<string, CourseRow> = {};
-  for (const inst of (scheduleRaw?.instructors ?? []) as CourseRow[]) {
-    instructorMap[inst.course_id] = inst;
-  }
-
-  const byDay = buildDaySlots(courseList, instructorMap);
+  const { byDay } = buildScheduleFromRaw(lec);
   const activeDays = DAY_KEYS.filter(d => (byDay[d]?.length ?? 0) > 0);
 
   const exams = exm as ExamData | null;
@@ -865,7 +967,9 @@ function SchedulePage() {
                 <div className="space-y-2">
                   {byDay[dayKey].map((slot, i) => {
                     const isTheory = slot.type === 'T';
-                    const instructor = isTheory ? slot.course.t_instructor_name : slot.course.p_instructor_name;
+                    const instructor = isTheory
+                      ? slot.course.t_instructor_name
+                      : slot.course.p_instructor_name;
                     return (
                       <div key={i}
                         className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 rounded-xl px-4 py-3 border-r-4"
@@ -1151,7 +1255,6 @@ function RegistrationPage() {
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("all");
-  const [showSchedule, setShowSchedule] = useState(false);
 
   if (loading) return <LoadingBlock />;
   if (error) return <ErrorBlock message={error} onRetry={refetch} />;
@@ -1166,18 +1269,13 @@ function RegistrationPage() {
   const rulesList = (rules as Array<{ rule: string; value: string }> | null) ?? [];
   const studentYear = parseInt((academic as AcademicProfile | null)?.level_short ?? "3", 10);
 
-  // Enrolled schedule for conflict reference
-  const scheduleRaw = lec as { courses?: CourseRow[]; instructors?: CourseRow[] } | null;
-  const enrolledList = (scheduleRaw?.courses ?? []) as CourseRow[];
-  const instructorMap: Record<string, CourseRow> = {};
-  for (const inst of (scheduleRaw?.instructors ?? []) as CourseRow[]) {
-    instructorMap[inst.course_id] = inst;
-  }
-  const enrolledByDay = buildDaySlots(enrolledList, instructorMap);
-  const enrolledActiveDays = DAY_KEYS.filter(d => (enrolledByDay[d]?.length ?? 0) > 0);
+  // Build schedule map from lectures: courseId -> slots with day info
+  const { coursesByCourseId } = buildScheduleFromRaw(lec);
 
-  // Tabs: all + each requirement_type_id
-  const reqTypes = Array.from(new Map(courses.map(c => [c.requirement_type_id, c.requirement_type])).entries());
+  // Tabs by requirement type
+  const reqTypes = Array.from(
+    new Map(courses.map(c => [c.requirement_type_id, c.requirement_type])).entries()
+  );
   const tabCourses = activeTab === "all" ? courses : courses.filter(c => c.requirement_type_id === activeTab);
 
   const toggle = (id: string, type: "study" | "exam") => {
@@ -1193,8 +1291,8 @@ function RegistrationPage() {
   const handleSubmit = async () => {
     setConfirm(false); setSubmitting(true); setResult(null);
     try {
-      const courseIds = Object.entries(selected).filter(([,t]) => t === "study").map(([id]) => id);
-      const onlyExamIds = Object.entries(selected).filter(([,t]) => t === "exam").map(([id]) => id);
+      const courseIds = Object.entries(selected).filter(([, t]) => t === "study").map(([id]) => id);
+      const onlyExamIds = Object.entries(selected).filter(([, t]) => t === "exam").map(([id]) => id);
       const res = await api.submitRegistration({ courseIds, onlyExamIds });
       const r = res as { success?: boolean; message?: string; errorMessages?: string[] };
       if (r.success) {
@@ -1242,55 +1340,17 @@ function RegistrationPage() {
         </Card>
       )}
 
-      {/* Enrolled schedule reference (collapsible) */}
-      {enrolledActiveDays.length > 0 && (
-        <Card>
-          <button onClick={() => setShowSchedule(s => !s)}
-            className="w-full flex items-center justify-between text-sm font-semibold text-gray-700">
-            <span className="flex items-center gap-2">
-              <Calendar size={16} className="text-[var(--aspu-green)]" />
-              جدولك الحالي (للمقارنة وتجنب التعارض)
-            </span>
-            <ChevronDown size={16} className={`transition-transform ${showSchedule ? 'rotate-180' : ''}`} />
-          </button>
-          {showSchedule && (
-            <div className="mt-4 space-y-4">
-              {enrolledActiveDays.map(dayKey => (
-                <div key={dayKey}>
-                  <span className="text-xs font-bold text-[var(--aspu-green)] bg-[var(--aspu-green-light)] px-3 py-1 rounded-full">
-                    {DAY_MAP[dayKey]}
-                  </span>
-                  <div className="mt-2 space-y-1.5">
-                    {enrolledByDay[dayKey].map((slot, i) => (
-                      <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-2"
-                        style={{ background: slot.type === 'T' ? '#f0fdf4' : '#fffbeb' }}>
-                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${slot.type === 'T' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                          {slot.type === 'T' ? 'نظري' : 'عملي'}
-                        </span>
-                        <span className="text-xs font-mono text-gray-600 ltr">{slot.time}</span>
-                        <span className="text-xs text-gray-700 font-medium flex-1 truncate">{slot.course.course_name}</span>
-                        {slot.room && <span className="text-xs text-gray-400 shrink-0">{slot.room}</span>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      )}
-
       {/* Legend */}
       <div className="flex flex-wrap gap-3 text-xs text-gray-500 px-1">
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-gray-100 border border-gray-200"></span>يمكن التسجيل</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-100 border border-amber-200"></span>مقرر سنة متقدمة</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-50 border border-red-200"></span>لا يمكن التسجيل</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-100 border border-blue-300"></span>محدد</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-gray-100 border border-gray-200 inline-block"></span>يمكن التسجيل</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-100 border border-amber-200 inline-block"></span>مقرر سنة متقدمة</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-50 border border-red-200 inline-block"></span>لا يمكن التسجيل</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-100 border border-blue-300 inline-block"></span>محدد</span>
       </div>
 
-      {/* Tabs by requirement type */}
+      {/* Tabs */}
       {reqTypes.length > 1 && (
-        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+        <div className="flex gap-2 overflow-x-auto pb-1">
           <button onClick={() => setActiveTab("all")}
             className={`text-xs font-medium px-3 py-1.5 rounded-full shrink-0 transition ${activeTab === "all" ? "bg-[var(--aspu-green)] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
             الكل ({courses.length})
@@ -1333,11 +1393,14 @@ function RegistrationPage() {
           const yearNum = parseInt(c.year_order, 10);
           const isAdvanced = yearNum > studentYear;
           const canReg = c.is_requestable === 'Y';
+          const slots = coursesByCourseId[c.course_id] ?? [];
+
           return (
             <div key={c.course_id}
               className={`border rounded-xl px-4 py-3 transition-colors ${style.border} ${style.bg}`}>
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
+                  {/* Course name + badges */}
                   <div className="flex items-center gap-2 flex-wrap mb-0.5">
                     <p className="font-medium text-sm text-gray-800 leading-snug">{c.course_name}</p>
                     {isAdvanced && (
@@ -1351,13 +1414,30 @@ function RegistrationPage() {
                       </span>
                     )}
                   </div>
+                  {/* Code + type + credits */}
                   <p className="text-xs text-gray-400">{c.course_code} · {c.requirement_type} · {c.course_credits} ساعة</p>
+                  {/* Block reason */}
                   {!canReg && c.status_reason && (
-                    <p className="text-xs text-red-500 mt-1">{c.status_reason}</p>
+                    <p className="text-xs text-red-500 mt-0.5">{c.status_reason}</p>
+                  )}
+                  {/* Schedule slots from lectures cross-reference */}
+                  {slots.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {slots.map((slot, si) => (
+                        <span key={si}
+                          className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md font-medium ${slot.type === 'T' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                          <span className="font-bold">{slot.type === 'T' ? 'ن' : 'ع'}</span>
+                          {DAY_MAP[slot.dayKey] ?? slot.dayKey}
+                          {' '}{slot.time}
+                          {slot.room ? ` · ${slot.room}` : ''}
+                        </span>
+                      ))}
+                    </div>
                   )}
                 </div>
+                {/* Register buttons */}
                 {canReg && (
-                  <div className="flex gap-1 shrink-0">
+                  <div className="flex gap-1 shrink-0 mt-0.5">
                     {c.allow_register === 'Y' && (
                       <button onClick={() => toggle(c.course_id, "study")}
                         className={`text-xs px-2 py-1 rounded-lg font-medium border transition-colors ${sel === "study" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:border-blue-300"}`}>
@@ -1380,6 +1460,7 @@ function RegistrationPage() {
     </div>
   );
 }
+
 
 // ─── Academic Status Page ─────────────────────────────────────────────────────
 
