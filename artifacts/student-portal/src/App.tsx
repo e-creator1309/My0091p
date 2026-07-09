@@ -764,108 +764,139 @@ function FinancialPage() {
   );
 }
 
+
+// ─── Schedule helpers ─────────────────────────────────────────────────────────
+
+const DAY_MAP: Record<string, string> = {
+  sat: 'السبت', sun: 'الأحد', mon: 'الاثنين',
+  tus: 'الثلاثاء', wed: 'الأربعاء', thu: 'الخميس', fri: 'الجمعة',
+};
+const DAY_KEYS = ['sat','sun','mon','tus','wed','thu','fri'] as const;
+type DayKey = typeof DAY_KEYS[number];
+
+interface CourseRow {
+  course_id: string; course_name: string; course_code: string; course_credits: string;
+  sat?: string; sun?: string; mon?: string; tus?: string; wed?: string; thu?: string; fri?: string;
+  t_instructor_name?: string | null; p_instructor_name?: string | null;
+}
+
+interface ParsedSlot {
+  type: 'T' | 'P';
+  time: string;
+  room: string;
+  course: CourseRow;
+}
+
+/** Parses ASPU's HTML-packed day cell: "P 10:00-11:00<br> قاعة 15 - 27T 08:00-10:00<br> قاعة 15 - 27" */
+function parseDaySlots(raw: string, course: CourseRow): ParsedSlot[] {
+  if (!raw?.trim()) return [];
+  const out: ParsedSlot[] = [];
+  // Each slot: (T|P) HH:MM-HH:MM<br> ROOM  — room ends at next T/P digit or string end
+  const re = /([TP]) (d{1,2}:d{2}-d{1,2}:d{2})<br>s*(.*?)(?=s*[TP] d|$)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    out.push({ type: m[1] as 'T'|'P', time: m[2], room: m[3].trim(), course });
+  }
+  return out;
+}
+
+function buildDaySlots(courseList: CourseRow[], instructorMap: Record<string, CourseRow>): Record<string, ParsedSlot[]> {
+  const byDay: Record<string, ParsedSlot[]> = {};
+  for (const course of courseList) {
+    const inst = instructorMap[course.course_id] ?? {};
+    const enriched: CourseRow = { ...course, t_instructor_name: inst.t_instructor_name, p_instructor_name: inst.p_instructor_name };
+    for (const dayKey of DAY_KEYS) {
+      const slots = parseDaySlots((course as Record<string,string>)[dayKey] ?? '', enriched);
+      if (slots.length > 0) {
+        if (!byDay[dayKey]) byDay[dayKey] = [];
+        byDay[dayKey].push(...slots);
+      }
+    }
+  }
+  // Sort each day's slots by start time
+  for (const k of Object.keys(byDay)) {
+    byDay[k].sort((a, b) => a.time.localeCompare(b.time));
+  }
+  return byDay;
+}
+
 function SchedulePage() {
   const { data: lec, loading: ll, error: el, refetch: rl } = useData(() => api.lectures());
   const { data: exm, loading: le, error: ee, refetch: re } = useData(() => api.exams());
 
   if (ll || le) return <LoadingBlock />;
 
-  const schedule = lec as ScheduleData | null;
+  const scheduleRaw = lec as { courses?: CourseRow[]; instructors?: CourseRow[] } | null;
+  const courseList = (scheduleRaw?.courses ?? []) as CourseRow[];
+  const instructorMap: Record<string, CourseRow> = {};
+  for (const inst of (scheduleRaw?.instructors ?? []) as CourseRow[]) {
+    instructorMap[inst.course_id] = inst;
+  }
+
+  const byDay = buildDaySlots(courseList, instructorMap);
+  const activeDays = DAY_KEYS.filter(d => (byDay[d]?.length ?? 0) > 0);
+
   const exams = exm as ExamData | null;
   const examList = (exams?.exams ?? []) as Array<{
-    course_name?: string;
-    exam_date?: string;
-    exam_time?: string;
-    room_name?: string;
-    seat_no?: string;
-    day_name?: string;
+    course_name?: string; exam_date?: string; exam_time?: string;
+    room_name?: string; seat_no?: string; day_name?: string;
   }>;
-
-  // Group lectures by day
-  const slots = (schedule?.courses ?? []) as LectureSlot[];
-  const dayOrder = ["السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة"];
-  const byDay = slots.reduce<Record<string, typeof slots>>((acc, slot) => {
-    const d = slot.day_name ?? "غير محدد";
-    if (!acc[d]) acc[d] = [];
-    acc[d].push(slot);
-    return acc;
-  }, {});
-  const sortedDays = Object.keys(byDay).sort((a, b) => {
-    const ai = dayOrder.indexOf(a);
-    const bi = dayOrder.indexOf(b);
-    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-  });
 
   return (
     <div className="space-y-5 fade-in">
-      {/* Lectures */}
       <Card>
         <SectionTitle>جدول المحاضرات</SectionTitle>
         {el ? (
           <ErrorBlock message={el} onRetry={rl} />
-        ) : slots.length === 0 ? (
+        ) : activeDays.length === 0 ? (
           <div className="flex flex-col items-center py-10 text-gray-300 gap-2">
             <Calendar size={32} />
-            <p className="text-sm text-gray-400">
-              الجدول غير متاح حالياً أو الفصل منتهٍ
-            </p>
+            <p className="text-sm text-gray-400">الجدول غير متاح حالياً أو الفصل منتهٍ</p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {sortedDays.map((day) => (
-              <div key={day}>
-                <div className="flex items-center gap-2 mb-2">
+          <div className="space-y-5">
+            {activeDays.map(dayKey => (
+              <div key={dayKey}>
+                <div className="mb-3">
                   <span className="text-xs font-bold text-[var(--aspu-green)] bg-[var(--aspu-green-light)] px-3 py-1 rounded-full">
-                    {day}
+                    {DAY_MAP[dayKey]}
                   </span>
                 </div>
                 <div className="space-y-2">
-                  {(byDay[day] ?? [])
-                    .slice()
-                    .sort((a, b) => Number(a.period_id ?? 0) - Number(b.period_id ?? 0))
-                    .map((slot, i) => {
-                      const time =
-                        slot.period_from && slot.period_to
-                          ? `${slot.period_from} – ${slot.period_to}`
-                          : slot.period_name ?? "—";
-                      const instructor =
-                        [slot.t_instructor_name, slot.p_instructor_name]
-                          .filter(Boolean)
-                          .join(" / ") || null;
-                      return (
-                        <div
-                          key={i}
-                          className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 bg-gray-50 rounded-xl px-4 py-3 border-r-4"
-                          style={{ borderColor: slot.color ?? "var(--aspu-green)" }}
-                        >
-                          {/* Time */}
-                          <span className="text-xs font-mono text-gray-500 shrink-0 ltr min-w-[110px]">
-                            {time}
-                          </span>
-                          {/* Course */}
-                          <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-sm text-gray-800 leading-snug">
-                              {slot.course_name ?? "—"}
-                            </p>
-                            <p className="text-xs text-gray-400 mt-0.5">
-                              {slot.course_code}
-                              {slot.course_credits ? ` · ${slot.course_credits} ساعة` : ""}
-                              {slot.period_name ? ` · ${slot.period_name}` : ""}
-                            </p>
-                          </div>
-                          {/* Instructor */}
-                          {instructor && (
-                            <p className="text-xs text-gray-500 shrink-0 text-left">{instructor}</p>
-                          )}
-                          {/* Room */}
-                          {slot.room_name && (
-                            <span className="text-xs bg-white border border-gray-200 text-gray-600 px-2.5 py-1 rounded-lg shrink-0">
-                              {slot.room_name}
-                            </span>
-                          )}
+                  {byDay[dayKey].map((slot, i) => {
+                    const isTheory = slot.type === 'T';
+                    const instructor = isTheory ? slot.course.t_instructor_name : slot.course.p_instructor_name;
+                    return (
+                      <div key={i}
+                        className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 rounded-xl px-4 py-3 border-r-4"
+                        style={{
+                          borderColor: isTheory ? 'var(--aspu-green)' : '#f59e0b',
+                          background: isTheory ? '#f0fdf4' : '#fffbeb',
+                        }}
+                      >
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md shrink-0 ${isTheory ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {isTheory ? 'نظري' : 'عملي'}
+                        </span>
+                        <span className="text-xs font-mono font-bold text-gray-700 shrink-0 ltr min-w-[110px]">
+                          {slot.time}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-sm text-gray-800 leading-snug">{slot.course.course_name}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {slot.course.course_code} · {slot.course.course_credits} ساعة
+                          </p>
                         </div>
-                      );
-                    })}
+                        {instructor && (
+                          <p className="text-xs text-gray-500 shrink-0">{instructor}</p>
+                        )}
+                        {slot.room && (
+                          <span className="text-xs bg-white border border-gray-200 text-gray-600 px-2.5 py-1 rounded-lg shrink-0">
+                            {slot.room}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ))}
@@ -1113,29 +1144,45 @@ function CurrentGradesPage() {
 function RegistrationPage() {
   const { data: opened, loading, error, refetch } = useData(() => api.registrationOpened());
   const { data: rules } = useData(() => api.registrationRules());
+  const { data: lec } = useData(() => api.lectures());
+  const { data: academic } = useData(() => api.academic());
   const [selected, setSelected] = useState<Record<string, "study" | "exam">>({});
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const [confirm, setConfirm] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>("all");
+  const [showSchedule, setShowSchedule] = useState(false);
 
   if (loading) return <LoadingBlock />;
   if (error) return <ErrorBlock message={error} onRetry={refetch} />;
 
-  const courses = ((opened as { courses?: unknown[] } | null)?.courses ?? []) as Array<{
+  type RegCourse = {
     course_id: string; course_name: string; course_code: string; course_credits: string;
-    requirement_type: string; allow_register: string; allow_exam: string;
-    status_reason: string; is_requestable: string; year_order: string;
-  }>;
+    requirement_type: string; requirement_type_id: string; allow_register: string; allow_exam: string;
+    allow_list: string; status_reason: string; is_requestable: string; year_order: string;
+  };
+
+  const courses = ((opened as { courses?: unknown[] } | null)?.courses ?? []) as RegCourse[];
   const rulesList = (rules as Array<{ rule: string; value: string }> | null) ?? [];
-  const canRegister = courses.filter(c => c.is_requestable === 'Y');
+  const studentYear = parseInt((academic as AcademicProfile | null)?.level_short ?? "3", 10);
+
+  // Enrolled schedule for conflict reference
+  const scheduleRaw = lec as { courses?: CourseRow[]; instructors?: CourseRow[] } | null;
+  const enrolledList = (scheduleRaw?.courses ?? []) as CourseRow[];
+  const instructorMap: Record<string, CourseRow> = {};
+  for (const inst of (scheduleRaw?.instructors ?? []) as CourseRow[]) {
+    instructorMap[inst.course_id] = inst;
+  }
+  const enrolledByDay = buildDaySlots(enrolledList, instructorMap);
+  const enrolledActiveDays = DAY_KEYS.filter(d => (enrolledByDay[d]?.length ?? 0) > 0);
+
+  // Tabs: all + each requirement_type_id
+  const reqTypes = Array.from(new Map(courses.map(c => [c.requirement_type_id, c.requirement_type])).entries());
+  const tabCourses = activeTab === "all" ? courses : courses.filter(c => c.requirement_type_id === activeTab);
 
   const toggle = (id: string, type: "study" | "exam") => {
     setSelected(prev => {
-      if (prev[id] === type) {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      }
+      if (prev[id] === type) { const n = { ...prev }; delete n[id]; return n; }
       return { ...prev, [id]: type };
     });
     setResult(null);
@@ -1144,9 +1191,7 @@ function RegistrationPage() {
   const selectedCount = Object.keys(selected).length;
 
   const handleSubmit = async () => {
-    setConfirm(false);
-    setSubmitting(true);
-    setResult(null);
+    setConfirm(false); setSubmitting(true); setResult(null);
     try {
       const courseIds = Object.entries(selected).filter(([,t]) => t === "study").map(([id]) => id);
       const onlyExamIds = Object.entries(selected).filter(([,t]) => t === "exam").map(([id]) => id);
@@ -1154,22 +1199,33 @@ function RegistrationPage() {
       const r = res as { success?: boolean; message?: string; errorMessages?: string[] };
       if (r.success) {
         setResult({ success: true, message: "تم إرسال طلب التسجيل بنجاح ✓" });
-        setSelected({});
-        refetch();
+        setSelected({}); refetch();
       } else {
-        const msg = r.errorMessages?.join(" | ") ?? r.message ?? "حدث خطأ أثناء التسجيل";
-        setResult({ success: false, message: msg });
+        setResult({ success: false, message: r.errorMessages?.join(" | ") ?? r.message ?? "حدث خطأ أثناء التسجيل" });
       }
     } catch (e: unknown) {
       setResult({ success: false, message: e instanceof Error ? e.message : "خطأ في الاتصال" });
-    } finally {
-      setSubmitting(false);
-    }
+    } finally { setSubmitting(false); }
+  };
+
+  const getCourseStyle = (c: RegCourse): { border: string; bg: string } => {
+    if (selected[c.course_id]) return { border: 'border-blue-300', bg: 'bg-blue-50' };
+    if (c.is_requestable !== 'Y') return { border: 'border-red-100', bg: 'bg-red-50/40' };
+    if (parseInt(c.year_order, 10) > studentYear) return { border: 'border-amber-200', bg: 'bg-amber-50/40' };
+    return { border: 'border-gray-100', bg: 'bg-gray-50' };
   };
 
   return (
-    <div className="space-y-5 fade-in">
-      <SectionTitle>تسجيل المقررات</SectionTitle>
+    <div className="space-y-4 fade-in">
+      <div className="flex items-center justify-between">
+        <SectionTitle>تسجيل المقررات</SectionTitle>
+        {selectedCount > 0 && (
+          <button onClick={() => setConfirm(true)} disabled={submitting}
+            className="bg-blue-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50">
+            {submitting ? "جاري الإرسال..." : `تسجيل ${selectedCount} مقرر`}
+          </button>
+        )}
+      </div>
 
       {/* Rules */}
       {rulesList.length > 0 && (
@@ -1186,6 +1242,68 @@ function RegistrationPage() {
         </Card>
       )}
 
+      {/* Enrolled schedule reference (collapsible) */}
+      {enrolledActiveDays.length > 0 && (
+        <Card>
+          <button onClick={() => setShowSchedule(s => !s)}
+            className="w-full flex items-center justify-between text-sm font-semibold text-gray-700">
+            <span className="flex items-center gap-2">
+              <Calendar size={16} className="text-[var(--aspu-green)]" />
+              جدولك الحالي (للمقارنة وتجنب التعارض)
+            </span>
+            <ChevronDown size={16} className={`transition-transform ${showSchedule ? 'rotate-180' : ''}`} />
+          </button>
+          {showSchedule && (
+            <div className="mt-4 space-y-4">
+              {enrolledActiveDays.map(dayKey => (
+                <div key={dayKey}>
+                  <span className="text-xs font-bold text-[var(--aspu-green)] bg-[var(--aspu-green-light)] px-3 py-1 rounded-full">
+                    {DAY_MAP[dayKey]}
+                  </span>
+                  <div className="mt-2 space-y-1.5">
+                    {enrolledByDay[dayKey].map((slot, i) => (
+                      <div key={i} className="flex items-center gap-3 rounded-lg px-3 py-2"
+                        style={{ background: slot.type === 'T' ? '#f0fdf4' : '#fffbeb' }}>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${slot.type === 'T' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {slot.type === 'T' ? 'نظري' : 'عملي'}
+                        </span>
+                        <span className="text-xs font-mono text-gray-600 ltr">{slot.time}</span>
+                        <span className="text-xs text-gray-700 font-medium flex-1 truncate">{slot.course.course_name}</span>
+                        {slot.room && <span className="text-xs text-gray-400 shrink-0">{slot.room}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-3 text-xs text-gray-500 px-1">
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-gray-100 border border-gray-200"></span>يمكن التسجيل</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-100 border border-amber-200"></span>مقرر سنة متقدمة</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-50 border border-red-200"></span>لا يمكن التسجيل</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-100 border border-blue-300"></span>محدد</span>
+      </div>
+
+      {/* Tabs by requirement type */}
+      {reqTypes.length > 1 && (
+        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+          <button onClick={() => setActiveTab("all")}
+            className={`text-xs font-medium px-3 py-1.5 rounded-full shrink-0 transition ${activeTab === "all" ? "bg-[var(--aspu-green)] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+            الكل ({courses.length})
+          </button>
+          {reqTypes.map(([id, name]) => (
+            <button key={id} onClick={() => setActiveTab(id)}
+              className={`text-xs font-medium px-3 py-1.5 rounded-full shrink-0 transition ${activeTab === id ? "bg-[var(--aspu-green)] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
+              {name} ({courses.filter(c => c.requirement_type_id === id).length})
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Result banner */}
       {result && (
         <div className={`rounded-xl px-4 py-3 text-sm font-medium ${result.success ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-red-50 text-red-600 border border-red-200"}`}>
@@ -1200,70 +1318,65 @@ function RegistrationPage() {
             <p className="text-lg font-bold text-gray-800">تأكيد التسجيل</p>
             <p className="text-sm text-gray-500">سيتم إرسال طلب تسجيل <span className="font-bold text-gray-700">{selectedCount} مقرر</span> إلى الجامعة. هل أنت متأكد؟</p>
             <div className="flex gap-3 justify-center">
-              <button onClick={handleSubmit} className="bg-emerald-500 text-white px-6 py-2 rounded-xl font-semibold text-sm hover:bg-emerald-600 transition-colors">
-                نعم، سجّل
-              </button>
-              <button onClick={() => setConfirm(false)} className="bg-gray-100 text-gray-600 px-6 py-2 rounded-xl font-semibold text-sm hover:bg-gray-200 transition-colors">
-                إلغاء
-              </button>
+              <button onClick={handleSubmit} className="bg-emerald-500 text-white px-6 py-2 rounded-xl font-semibold text-sm hover:bg-emerald-600 transition-colors">نعم، سجّل</button>
+              <button onClick={() => setConfirm(false)} className="bg-gray-100 text-gray-600 px-6 py-2 rounded-xl font-semibold text-sm hover:bg-gray-200 transition-colors">إلغاء</button>
             </div>
           </div>
         </div>
       )}
 
       {/* Courses list */}
-      <Card>
-        <div className="flex items-center justify-between mb-4">
-          <SectionTitle>المقررات المتاحة للتسجيل ({canRegister.length})</SectionTitle>
-          {selectedCount > 0 && (
-            <button
-              onClick={() => setConfirm(true)}
-              disabled={submitting}
-              className="bg-blue-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center gap-1"
-            >
-              {submitting ? "جاري الإرسال..." : `تسجيل ${selectedCount} مقرر`}
-            </button>
-          )}
-        </div>
-
-        {canRegister.length === 0 ? (
-          <p className="text-center text-gray-400 py-8 text-sm">لا توجد مقررات متاحة للتسجيل حالياً</p>
-        ) : (
-          <div className="space-y-2">
-            {canRegister.map((c) => {
-              const sel = selected[c.course_id];
-              return (
-                <div key={c.course_id} className={`border rounded-xl px-4 py-3 transition-colors ${sel ? "border-blue-300 bg-blue-50" : "border-gray-100 bg-gray-50"}`}>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm text-gray-800 leading-snug">{c.course_name}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">{c.course_code} · {c.requirement_type} · {c.course_credits} ساعة</p>
-                    </div>
-                    <div className="flex gap-1 shrink-0">
-                      {c.allow_register === 'Y' && (
-                        <button
-                          onClick={() => toggle(c.course_id, "study")}
-                          className={`text-xs px-2 py-1 rounded-lg font-medium border transition-colors ${sel === "study" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:border-blue-300"}`}
-                        >
-                          دراسة
-                        </button>
-                      )}
-                      {c.allow_exam === 'Y' && (
-                        <button
-                          onClick={() => toggle(c.course_id, "exam")}
-                          className={`text-xs px-2 py-1 rounded-lg font-medium border transition-colors ${sel === "exam" ? "bg-amber-500 text-white border-amber-500" : "bg-white text-gray-600 border-gray-200 hover:border-amber-300"}`}
-                        >
-                          امتحان
-                        </button>
-                      )}
-                    </div>
+      <div className="space-y-2">
+        {tabCourses.map(c => {
+          const style = getCourseStyle(c);
+          const sel = selected[c.course_id];
+          const yearNum = parseInt(c.year_order, 10);
+          const isAdvanced = yearNum > studentYear;
+          const canReg = c.is_requestable === 'Y';
+          return (
+            <div key={c.course_id}
+              className={`border rounded-xl px-4 py-3 transition-colors ${style.border} ${style.bg}`}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                    <p className="font-medium text-sm text-gray-800 leading-snug">{c.course_name}</p>
+                    {isAdvanced && (
+                      <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded shrink-0">
+                        سنة {yearNum}
+                      </span>
+                    )}
+                    {!canReg && (
+                      <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded shrink-0">
+                        محظور
+                      </span>
+                    )}
                   </div>
+                  <p className="text-xs text-gray-400">{c.course_code} · {c.requirement_type} · {c.course_credits} ساعة</p>
+                  {!canReg && c.status_reason && (
+                    <p className="text-xs text-red-500 mt-1">{c.status_reason}</p>
+                  )}
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
+                {canReg && (
+                  <div className="flex gap-1 shrink-0">
+                    {c.allow_register === 'Y' && (
+                      <button onClick={() => toggle(c.course_id, "study")}
+                        className={`text-xs px-2 py-1 rounded-lg font-medium border transition-colors ${sel === "study" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-gray-600 border-gray-200 hover:border-blue-300"}`}>
+                        دراسة
+                      </button>
+                    )}
+                    {c.allow_exam === 'Y' && (
+                      <button onClick={() => toggle(c.course_id, "exam")}
+                        className={`text-xs px-2 py-1 rounded-lg font-medium border transition-colors ${sel === "exam" ? "bg-amber-500 text-white border-amber-500" : "bg-white text-gray-600 border-gray-200 hover:border-amber-300"}`}>
+                        امتحان
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
